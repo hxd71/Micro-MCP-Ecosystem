@@ -1,0 +1,12 @@
+[project]
+name = "mcp-core-hub"
+version = "0.1.0"
+description = "Central LangGraph hub for multiple MCP servers"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "mcp>=1.4.1",
+    "langgraph>=0.2.0",
+    "langchain-core>=0.3.0",
+    "langchain-openai>=0.2.0",
+]

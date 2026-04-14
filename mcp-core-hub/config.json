@@ -1,0 +1,31 @@
+{
+  "model": {
+    "provider": "openai",
+    "model": "minimax-text-01",
+    "base_url": "https://api.minimaxi.chat/v1",
+    "temperature": 0
+  },
+  "servers": [
+    {
+      "name": "mcp-server-devops",
+      "enabled": true,
+      "script": "../server.py",
+      "args": ["--transport", "stdio"],
+      "env": {
+        "MCP_APPROVAL_MODE": "auto"
+      }
+    },
+    {
+      "name": "mcp-server-rag-docs",
+      "enabled": true,
+      "script": "../mcp-server-rag-docs/server.py",
+      "args": ["--transport", "stdio"]
+    },
+    {
+      "name": "mcp-server-memory-kv",
+      "enabled": true,
+      "script": "../mcp-server-memory-kv/server.py",
+      "args": ["--transport", "stdio"]
+    }
+  ]
+}

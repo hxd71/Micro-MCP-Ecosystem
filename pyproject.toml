@@ -1,0 +1,11 @@
+[project]
+name = "mcp-server-devops"
+version = "0.1.0"
+description = "MCP devops server with human-in-the-loop shell execution"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "mcp>=1.4.1",
+    "starlette>=0.46.1",
+    "uvicorn>=0.34.0",
+]
