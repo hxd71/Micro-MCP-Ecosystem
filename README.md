@@ -33,6 +33,10 @@
 - `mcp-server-memory-kv/server.py`：本地 JSON 持久化 KV 记忆服务
 - `protocals/`：协议与 SDK 学习资料
 
+<p align="center">
+  <img src="./docs/module-architecture.svg" alt="Micro-MCP-Ecosystem 模块架构图" width="100%" />
+</p>
+
 调用链路（逻辑视图）：
 
 1. 用户输入任务到 Hub。
