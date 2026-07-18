@@ -18,3 +18,7 @@ The job performs these checks against the production unit and a `live` profile i
 The workflow must pass on the exact commit released to `main`. A successful remote run is the release
 evidence for native systemd installation, lifecycle, permission, and crash-recovery behavior. GPU and
 inference evidence remains in `hardware-acceptance-rtx3050-wsl2.md`.
+
+The state and runtime parent directories use execute-only traversal for non-owners (`0711`). Their
+contents cannot be listed by other users. The token (`0640`) and Unix socket (`0660`) remain explicitly
+restricted to `aiops-operators`, while SQLite state files remain owned by the private `aiops` group.
