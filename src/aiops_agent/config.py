@@ -118,5 +118,8 @@ class Settings:
         for path in (self.state_dir, self.run_dir, self.backup_dir):
             path.mkdir(parents=True, exist_ok=True)
         if os.name != "nt":
-            for path in (self.state_dir, self.run_dir, self.backup_dir):
-                path.chmod(0o750)
+            # Operators need traversal to the protected token and Unix socket,
+            # but must not be able to list daemon state or runtime contents.
+            self.state_dir.chmod(0o711)
+            self.run_dir.chmod(0o711)
+            self.backup_dir.chmod(0o750)
