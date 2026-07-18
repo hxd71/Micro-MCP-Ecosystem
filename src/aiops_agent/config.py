@@ -7,7 +7,7 @@ import sys
 if sys.version_info >= (3, 11):
     import tomllib
 else:  # Python 3.10 on Ubuntu 22.04
-    import tomli as tomllib  # type: ignore[import-not-found]
+    import tomli as tomllib
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal

@@ -48,6 +48,13 @@ wait_for_socket() {
     fi
     sleep 0.5
   done
+  id aiops || true
+  sudo ls -ld /run/aiops-agent /var/lib/aiops-agent || true
+  sudo ls -la /run/aiops-agent || true
+  if [[ -e /run/aiops-agent/agent.sock ]]; then
+    sudo stat -c 'socket=%F mode=%a owner=%U group=%G' /run/aiops-agent/agent.sock || true
+  fi
+  sudo systemctl status --no-pager aiops-agent.service || true
   return 1
 }
 
