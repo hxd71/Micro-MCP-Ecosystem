@@ -1,0 +1,9 @@
+{
+  "service_name": "mindie-llm",
+  "model_path": "/models/llama2-7b",
+  "device_ids": [0],
+  "max_batch_size": 16,
+  "max_prefill_tokens": 8192,
+  "model_load_timeout_ms": 120000,
+  "health_check_timeout_ms": 3000
+}

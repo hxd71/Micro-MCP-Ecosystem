@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token }}">
+  <title>{{ title }} · Local AI Ops</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script defer src="/static/app.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="/ui/" aria-label="Local AI Ops 首页">
+        <span class="brand-mark">A</span>
+        <span><strong>Local AI Ops</strong><small>vLLM control plane</small></span>
+      </a>
+      <nav aria-label="主导航">
+        <a href="/ui/" class="nav-link {% if page == 'dashboard' %}active{% endif %}">
+          <span class="nav-icon">⌂</span><span>运行总览</span>
+        </a>
+        <a href="/ui/tasks" class="nav-link {% if page == 'tasks' %}active{% endif %}">
+          <span class="nav-icon">≡</span><span>任务</span>
+        </a>
+        <a href="/ui/audit" class="nav-link {% if page == 'audit' %}active{% endif %}">
+          <span class="nav-icon">✓</span><span>审计</span>
+        </a>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="profile-row"><span class="status-dot {% if profile == 'live' %}good{% else %}warn{% endif %}"></span>{{ profile }}</div>
+        <small>{{ operator }}</small>
+      </div>
+    </aside>
+    <main class="main-content">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">AI INFRA / NVIDIA / VLLM</p>
+          <h1>{{ title }}</h1>
+        </div>
+        <div id="flash" class="flash" role="status" aria-live="polite"></div>
+      </header>
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</body>
+</html>

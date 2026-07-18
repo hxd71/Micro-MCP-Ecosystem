@@ -1,0 +1,11 @@
+{
+  "service_name": "vllm-qwen",
+  "framework": "vllm",
+  "model_path": "demo/models/Qwen2.5-7B-Instruct",
+  "host": "0.0.0.0",
+  "port": 8000,
+  "max_model_len": 32768,
+  "gpu_memory_utilization": 0.95,
+  "tensor_parallel_size": 1,
+  "startup_timeout_seconds": 180
+}

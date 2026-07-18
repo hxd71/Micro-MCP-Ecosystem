@@ -1,0 +1,8 @@
+[project]
+name = "mcp-server-container-ops"
+version = "0.1.0"
+description = "Container diagnostics MCP server for AI Infra Ops Agent"
+requires-python = ">=3.12"
+dependencies = [
+    "mcp>=1.4.1",
+]

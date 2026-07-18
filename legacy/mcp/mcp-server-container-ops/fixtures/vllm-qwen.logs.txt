@@ -1,0 +1,4 @@
+2026-07-02 10:00:01 INFO  [vllm.entrypoints.openai.api_server] Starting vLLM OpenAI-compatible server on 0.0.0.0:8000
+2026-07-02 10:00:05 WARN  [vllm.health] /v1/models returned 503 because model worker is not ready
+2026-07-02 10:00:09 ERROR [vllm.worker] CUDA out of memory while loading model weights on GPU 0
+2026-07-02 10:00:09 ERROR [vllm.engine] model load timeout after 180000 ms, worker state=initializing

@@ -8,7 +8,17 @@ wheels/
 
 # Virtual environments
 .venv
+.vscode/
 
 # Local secrets
 .env
 .env.*
+
+# Runtime artifacts
+logs/
+.aiops/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage

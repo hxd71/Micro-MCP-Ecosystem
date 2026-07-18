@@ -1,0 +1,9 @@
+[project]
+name = "mcp-server-ascend-ops"
+version = "0.1.0"
+description = "MCP tools for Ascend inference service diagnostics and remediation planning"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "mcp>=1.4.1",
+]

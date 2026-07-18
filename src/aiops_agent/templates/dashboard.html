@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="metric-grid" aria-label="节点关键指标">
+  <div class="metric">
+    <span>Docker Engine</span>
+    <strong class="{% if capabilities.docker.available %}text-good{% else %}text-bad{% endif %}">{{ "ONLINE" if capabilities.docker.available else "UNAVAILABLE" }}</strong>
+    <small>{{ capabilities.docker.version or capabilities.docker.error or "not reported" }}</small>
+  </div>
+  <div class="metric">
+    <span>NVIDIA GPU</span>
+    <strong class="{% if capabilities.nvidia.available %}text-good{% else %}text-bad{% endif %}">{{ gpu_devices|length }} DEVICE{{ "S" if gpu_devices|length != 1 else "" }}</strong>
+    <small>{{ capabilities.nvidia.driver_version or capabilities.nvidia.error or "not reported" }}</small>
+  </div>
+  <div class="metric">
+    <span>受管服务</span>
+    <strong>{{ services|length }}</strong>
+    <small>{{ services|selectattr('health_status', 'equalto', 'healthy')|list|length }} healthy</small>
+  </div>
+  <div class="metric">
+    <span>审计链</span>
+    <strong class="{% if capabilities.event_chain_valid %}text-good{% else %}text-bad{% endif %}">{{ "VALID" if capabilities.event_chain_valid else "BROKEN" }}</strong>
+    <small>append-only event digest</small>
+  </div>
+</section>
+
+<div class="dashboard-grid">
+  <section class="panel span-2">
+    <div class="section-head"><div><p class="eyebrow">SERVICES</p><h2>vLLM 服务</h2></div><span class="count">{{ services|length }}</span></div>
+    {% if services %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>名称</th><th>健康</th><th>镜像</th><th>端口</th><th>最近巡检</th></tr></thead>
+        <tbody>
+        {% for service in services %}
+          <tr>
+            <td><a class="primary-link" href="/ui/services/{{ service.name }}">{{ service.name }}</a></td>
+            <td><span class="status-label {{ service.health_status }}"><i></i>{{ service.health_status }}</span></td>
+            <td class="mono truncate">{{ service.manifest.spec.image }}</td>
+            <td>{{ service.manifest.spec.endpoint.hostPort }}</td>
+            <td class="muted">{{ service.last_checked_at or "尚未巡检" }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state"><strong>尚无受管服务</strong><p>通过 CLI 提交第一份 InferenceService 清单。</p><pre>aiops deploy examples/vllm-service.yaml</pre></div>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <div class="section-head"><div><p class="eyebrow">GPU MEMORY</p><h2>加速卡</h2></div></div>
+    {% if gpu_devices %}
+      <div class="gpu-list">
+      {% for gpu in gpu_devices %}
+        <div class="gpu-row">
+          <div><strong>GPU {{ gpu.index }}</strong><small>{{ gpu.name }}</small></div><span>{{ gpu.memory_percent }}%</span>
+          <div class="meter"><i style="width: {{ gpu.memory_percent }}%" class="{% if gpu.memory_percent >= 90 %}danger{% elif gpu.memory_percent >= 75 %}warning{% endif %}"></i></div>
+          <small>{{ gpu.memory_used_mb }} / {{ gpu.memory_total_mb }} MiB · {{ gpu.temperature_c }}°C</small>
+        </div>
+      {% endfor %}
+      </div>
+    {% else %}<div class="empty-state compact"><p>没有可用的 NVIDIA 指标。</p></div>{% endif %}
+  </section>
+
+  <section class="panel span-2">
+    <div class="section-head"><div><p class="eyebrow">TASKS</p><h2>最近任务</h2></div><a href="/ui/tasks">查看全部</a></div>
+    <div class="timeline-list">
+    {% for task in tasks %}
+      <a class="timeline-item" href="/ui/tasks/{{ task.id }}">
+        <span class="status-dot {% if task.status.value in ['succeeded'] %}good{% elif task.status.value in ['failed','rolled_back'] %}bad{% elif task.status.value == 'waiting_approval' %}warn{% endif %}"></span>
+        <span><strong>{{ task.kind.value }}</strong><small>{{ task.target.name }} · {{ task.created_at }}</small></span>
+        <span class="status-label {{ task.status.value }}">{{ task.status.value }}</span>
+      </a>
+    {% else %}<div class="empty-state compact"><p>还没有任务记录。</p></div>{% endfor %}
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="section-head"><div><p class="eyebrow">FINDINGS</p><h2>近期风险</h2></div><span class="count">{{ findings|length }}</span></div>
+    <div class="finding-list">
+    {% for finding in findings %}
+      <a href="/ui/tasks/{{ finding.task_id }}" class="finding-row">
+        <span class="severity {{ finding.severity.value }}">{{ finding.severity.value }}</span>
+        <span><strong>{{ finding.title }}</strong><small>{{ finding.code }}</small></span>
+      </a>
+    {% else %}<div class="empty-state compact"><p>当前没有 Finding。</p></div>{% endfor %}
+    </div>
+  </section>
+</div>
+{% endblock %}

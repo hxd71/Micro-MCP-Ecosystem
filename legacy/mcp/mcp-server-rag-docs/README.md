@@ -6,7 +6,8 @@ A lightweight MCP RAG server for local docs.
 
 - Reads files from `docs/` (`.md`, `.txt`, `.log`)
 - Splits text chunks with LangChain text splitter
-- Builds an in-memory FAISS vector index at startup
+- Builds an in-memory TF-IDF index at startup
+- Uses FAISS when installed, and falls back to numpy cosine/IP search when FAISS is unavailable
 - Exposes MCP tools:
   - `search_knowledge_base(query: str)`
   - `refresh_knowledge_base()`

@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <div class="section-head"><div><p class="eyebrow">TASK HISTORY</p><h2>所有任务</h2></div><span class="count">{{ tasks|length }}</span></div>
+  <div class="table-wrap"><table><thead><tr><th>任务</th><th>类型</th><th>服务</th><th>状态</th><th>更新时间</th></tr></thead><tbody>
+  {% for task in tasks %}<tr><td><a class="primary-link mono" href="/ui/tasks/{{ task.id }}">{{ task.id[:12] }}</a></td><td>{{ task.kind.value }}</td><td>{{ task.target.name }}</td><td><span class="status-label {{ task.status.value }}"><i></i>{{ task.status.value }}</span></td><td>{{ task.updated_at }}</td></tr>
+  {% else %}<tr><td colspan="5" class="muted">暂无任务。</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+{% endblock %}

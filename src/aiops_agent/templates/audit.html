@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="audit-toolbar">
+  <div class="chain-state"><span class="status-dot {% if chain_valid %}good{% else %}bad{% endif %}"></span><span><strong>事件链 {{ "有效" if chain_valid else "损坏" }}</strong><small>SHA-256 chained audit records</small></span></div>
+  <form method="get" class="filters"><input name="task_id" value="{{ task_id }}" placeholder="Task ID"><select name="event_type"><option value="">全部事件</option>{% for kind in ['task.created','task.status','observation.recorded','finding.created','action.proposed','action.decided','action.status'] %}<option value="{{ kind }}" {% if event_type == kind %}selected{% endif %}>{{ kind }}</option>{% endfor %}</select><button>筛选</button></form>
+</section>
+<section class="panel">
+  <div class="section-head"><div><p class="eyebrow">AUDIT LOG</p><h2>审计事件</h2></div><span class="count">{{ events|length }}</span></div>
+  <div class="audit-list">
+  {% for event in events %}<article><code class="seq">#{{ event.seq }}</code><span><strong>{{ event.event_type }}</strong><small>{{ event.created_at }} · {{ event.task_id or 'system' }}</small></span><pre>{{ event.data|tojson }}</pre><code class="hash">{{ event.event_hash[:16] }}</code></article>
+  {% else %}<div class="empty-state compact"><p>没有匹配的审计事件。</p></div>{% endfor %}
+  </div>
+</section>
+{% endblock %}

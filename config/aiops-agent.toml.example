@@ -1,0 +1,19 @@
+[server]
+web_host = "127.0.0.1"
+web_port = 8787
+state_dir = "/var/lib/aiops-agent"
+run_dir = "/run/aiops-agent"
+
+[operator]
+name = "local-operator"
+
+[policy]
+approval_ttl_seconds = 900
+allowed_model_roots = ["/models"]
+allowed_secret_roots = ["/etc/aiops-agent/secrets"]
+allowed_registries = ["docker.io", "ghcr.io"]
+allowed_probe_cidrs = ["127.0.0.0/8", "::1/128"]
+
+[monitoring]
+enabled = true
+tick_seconds = 15

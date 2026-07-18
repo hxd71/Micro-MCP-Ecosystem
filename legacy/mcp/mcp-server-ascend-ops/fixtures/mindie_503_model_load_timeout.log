@@ -1,0 +1,8 @@
+2026-07-01 10:02:11.224 INFO  [mindie.server] starting OpenAI-compatible inference service on 0.0.0.0:8080
+2026-07-01 10:02:12.019 INFO  [mindie.runtime] ASCEND_HOME_PATH=/usr/local/Ascend/ascend-toolkit/latest
+2026-07-01 10:02:12.447 INFO  [mindie.model] loading model from /models/llama2-7b
+2026-07-01 10:02:19.773 WARN  [mindie.health] /v1/models returned 503 because model worker is not ready
+2026-07-01 10:02:21.006 ERROR [mindie.runtime] ACL_ERROR_RT_MEMORY_ALLOCATION: HBM memory allocation failed on device 0
+2026-07-01 10:02:21.012 ERROR [mindie.model] model load timeout after 120000 ms, worker state=initializing
+2026-07-01 10:02:21.017 WARN  [mindie.health] service unavailable, returning HTTP 503
+2026-07-01 10:02:21.120 INFO  [mindie.server] keep process alive for diagnostics

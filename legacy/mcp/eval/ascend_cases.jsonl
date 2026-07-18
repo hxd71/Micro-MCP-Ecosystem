@@ -1,0 +1,2 @@
+{"id":"mindie_503_hbm_timeout","symptom":"MindIE service returns HTTP 503 after startup and model loading times out","log_path":"mcp-server-ascend-ops/fixtures/mindie_503_model_load_timeout.log","expected_patterns":["http_503","model_load_timeout","npu_memory_pressure"],"expected_keywords":["HBM","模型加载超时","NPU"]}
+{"id":"mindie_503_generic","symptom":"推理服务启动后一直 503","log_path":"mcp-server-ascend-ops/fixtures/mindie_503_model_load_timeout.log","expected_patterns":["http_503","model_load_timeout"],"expected_keywords":["503","模型加载"]}
