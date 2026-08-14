@@ -1,8 +1,0 @@
-[project]
-name = "mcp-server-ai-serving-ops"
-version = "0.1.0"
-description = "AI serving diagnostics and safe config repair MCP server"
-requires-python = ">=3.12"
-dependencies = [
-    "mcp>=1.4.1",
-]

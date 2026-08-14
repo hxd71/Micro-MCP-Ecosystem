@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from aiops_agent.api import create_app
-from aiops_agent.engine import OpsEngine
-from aiops_agent.models import InferenceServiceManifest
+from termops.api import create_app
+from termops.engine import OpsEngine
+from termops.models import AnalysisRequest, TaskKind
 
 
 def test_management_api_route_contract(settings) -> None:
@@ -13,29 +13,56 @@ def test_management_api_route_contract(settings) -> None:
     routes = {(method, route.path) for route in app.routes for method in getattr(route, "methods", set())}
     expected = {
         ("GET", "/v1/capabilities"),
-        ("GET", "/v1/services"),
-        ("POST", "/v1/tasks/deploy"),
-        ("POST", "/v1/tasks/diagnose"),
-        ("POST", "/v1/tasks/security"),
-        ("POST", "/v1/tasks/rollback"),
+        ("POST", "/v1/tasks/analyze"),
+        ("POST", "/v1/tasks/run"),
+        ("POST", "/v1/tasks/probe"),
+        ("POST", "/v1/knowledge"),
+        ("GET", "/v1/tasks"),
         ("GET", "/v1/tasks/{task_id}"),
         ("GET", "/v1/tasks/{task_id}/events"),
+        ("GET", "/v1/tasks/{task_id}/knowledge"),
         ("POST", "/v1/tasks/{task_id}/cancel"),
         ("POST", "/v1/actions/{action_id}/decision"),
         ("GET", "/v1/events"),
+        ("GET", "/v1/knowledge"),
+        ("POST", "/v1/knowledge/search"),
+        ("GET", "/v1/knowledge/stats"),
     }
     assert expected.issubset(routes)
     with TestClient(app) as client:
-        assert client.get("/healthz").json() == {"ok": True, "profile": "test"}
+        resp = client.get("/healthz").json()
+        assert resp["ok"] is True
+        assert resp["profile"] == "test"
+        assert resp["agent"] == "Local Error Analysis Agent"
     engine.store.close()
 
 
-def test_manifest_json_schema_contract() -> None:
-    schema = InferenceServiceManifest.model_json_schema(by_alias=True)
-    assert schema["additionalProperties"] is False
-    assert set(schema["required"]) == {"apiVersion", "kind", "metadata", "spec"}
-    spec = schema["$defs"]["InferenceServiceSpec"]
-    assert spec["additionalProperties"] is False
-    assert {"image", "model"}.issubset(spec["required"])
-    assert "vllm" in spec["properties"]
-    assert "monitoring" in spec["properties"]
+def test_analysis_request_contract() -> None:
+    """Verify the AnalysisRequest model validates correctly."""
+    req = AnalysisRequest(text="ModuleNotFoundError: No module named 'click'")
+    assert req.text == "ModuleNotFoundError: No module named 'click'"
+    assert req.source == "stdin"
+    assert req.language == ""
+
+    # Empty text should be allowed (validated at API level)
+    req2 = AnalysisRequest(text="")
+    assert req2.text == ""
+
+    # With full context
+    req3 = AnalysisRequest(
+        text="ERROR: connection refused",
+        source="terminal",
+        language="python",
+        command="pytest",
+        cwd="/home/user/project",
+        exit_code=1,
+    )
+    assert req3.exit_code == 1
+    assert req3.language == "python"
+
+
+def test_task_kind_enum() -> None:
+    assert TaskKind.ANALYZE.value == "analyze"
+    assert TaskKind.VERIFY.value == "verify"
+    assert TaskKind.PROBE.value == "probe"
+    assert TaskKind.KNOWLEDGE_RECORD.value == "knowledge_record"

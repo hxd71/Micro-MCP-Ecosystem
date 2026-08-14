@@ -1,0 +1,495 @@
+"""MAPE-K analysis engine for terminal and code errors.
+
+The engine treats every task as a loop through Monitor, Analyze, Plan, Execute,
+Observe and Knowledge. State transitions are explicit, persisted, and auditable.
+Only actions that have passed human approval are executed.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import os
+import shlex
+import subprocess
+from collections.abc import Coroutine
+from pathlib import Path
+from typing import Any
+
+from langchain_core.runnables import RunnableConfig
+
+from .config import Settings
+from .diagnostics import classify_error
+from .graph import build_analysis_graph, build_execution_graph
+from .llm_client import LLMClient
+from .models import (
+    TERMINAL_TASK_STATUSES,
+    ActionStatus,
+    AnalysisReport,
+    AnalysisRequest,
+    ApprovalDecision,
+    EnvSnapshot,
+    FileAttachment,
+    LLMAttribution,
+    MapePhase,
+    Severity,
+    TargetRef,
+    Task,
+    TaskKind,
+    TaskStatus,
+)
+from .providers import EnvProbe
+from .security import new_token
+from .store import StateStore
+
+
+class OpsEngine:
+    """Local error analysis engine with approval-gated action execution."""
+
+    def __init__(
+        self,
+        settings: Settings,
+        store: StateStore | None = None,
+        probe: EnvProbe | None = None,
+    ):
+        self.settings = settings
+        self.settings.ensure_directories()
+        self.store = store or StateStore(settings.database_path)
+        self.probe = probe or EnvProbe(env_allowlist=settings.env_allowlist)
+        self._jobs: set[asyncio.Task[Any]] = set()
+        self._analysis_graph: Any | None = None
+        self._execution_graph: Any | None = None
+        self.llm = LLMClient(settings.llm)
+        self.operator_token = self._load_or_create_operator_token()
+
+    @property
+    def analysis_graph(self) -> Any:
+        if self._analysis_graph is None:
+            self._analysis_graph = build_analysis_graph()
+        return self._analysis_graph
+
+    @property
+    def execution_graph(self) -> Any:
+        if self._execution_graph is None:
+            self._execution_graph = build_execution_graph()
+        return self._execution_graph
+
+    def _load_or_create_operator_token(self) -> str:
+        path = self.settings.operator_token_path
+        if path.exists():
+            return path.read_text(encoding="utf-8").strip()
+        token = new_token()
+        path.write_text(token + "\n", encoding="utf-8")
+        if self.settings.profile == "live" and Path(path).drive == "":
+            path.chmod(0o600)
+        return token
+
+    async def start(self) -> None:
+        for task in self.store.list_tasks(limit=500):
+            if task.status in {TaskStatus.EXECUTING, TaskStatus.VERIFYING}:
+                self.store.update_task(task.id, TaskStatus.RECONCILING, force=True)
+                self._spawn(self._reconcile_task(task.id))
+            elif task.status == TaskStatus.QUEUED:
+                self._spawn(self.process_task(task.id))
+
+    async def stop(self) -> None:
+        for job in list(self._jobs):
+            job.cancel()
+        if self._jobs:
+            await asyncio.gather(*self._jobs, return_exceptions=True)
+
+    def _spawn(self, coroutine: Coroutine[Any, Any, Any]) -> None:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = asyncio.get_event_loop()
+        job = loop.create_task(coroutine)
+        self._jobs.add(job)
+        job.add_done_callback(self._jobs.discard)
+
+    @staticmethod
+    def _split_command(command: str) -> list[str]:
+        parts = shlex.split(command, posix=False)
+        return [part[1:-1] if len(part) >= 2 and part[0] == part[-1] == '"' else part for part in parts]
+
+    def _mark_phase(self, task_id: str, phase: MapePhase, detail: str = "") -> None:
+        self.store.update_task_phase(task_id, phase)
+        self.store.append_event("task.phase", {"phase": phase.value, "detail": detail}, task_id)
+
+    def task_detail(self, task_id: str) -> dict[str, Any]:
+        task = self.store.get_task(task_id)
+        return {
+            "task": task.model_dump(mode="json"),
+            "observations": [item.model_dump(mode="json") for item in self.store.list_observations(task_id)],
+            "findings": [item.model_dump(mode="json") for item in self.store.list_findings(task_id)],
+            "actions": [item.model_dump(mode="json") for item in self.store.list_actions(task_id)],
+            "knowledge": self.store.list_knowledge(task_id),
+            "events": self.store.list_events(task_id, limit=200),
+        }
+
+    def capabilities(self) -> dict[str, Any]:
+        return {
+            "profile": self.settings.profile,
+            "host": self.probe.capabilities(),
+            "llm": {
+            "provider": self.llm.config.provider.value,
+            "enabled": self.llm.enabled,
+            "model": self.llm.config.model if self.llm.enabled else None,
+            "reason": "llm attribution active" if self.llm.enabled else "deterministic production core",
+        },
+            "orchestration": {"mape_k": True, "framework": "langgraph"},
+            "event_chain_valid": self.store.verify_event_chain(),
+        }
+
+    # ------------------------------------------------------------------
+    # Public submission API
+    # ------------------------------------------------------------------
+
+    def submit_analysis(
+        self,
+        text: str,
+        *,
+        source: str = "stdin",
+        language: str = "",
+        command: str = "",
+        cwd: str = "",
+        exit_code: int | None = None,
+        files: list[FileAttachment] | None = None,
+        history_task_ids: list[str] | None = None,
+    ) -> Task:
+        request = AnalysisRequest(
+            text=text,
+            source=source,
+            language=language,
+            command=command,
+            cwd=cwd,
+            exit_code=exit_code,
+            files=files or [],
+            history_task_ids=history_task_ids or [],
+        )
+        task = self.store.create_task(
+            TaskKind.ANALYZE,
+            TargetRef(kind="terminal" if command else "workspace", name=request.source),
+            request.model_dump(mode="json"),
+        )
+        self._spawn(self.process_task(task.id))
+        return task
+
+    def submit_run(
+        self,
+        command: list[str],
+        *,
+        cwd: str = "",
+        language: str = "",
+        timeout: int = 120,
+    ) -> Task:
+        request = AnalysisRequest(
+            text="",
+            source="cli_run",
+            language=language,
+            command=subprocess.list2cmdline(command) if os.name == "nt" else shlex.join(command),
+            cwd=cwd,
+            exit_code=None,
+        )
+        task = self.store.create_task(
+            TaskKind.ANALYZE,
+            TargetRef(kind="command", name=request.command),
+            {
+                **request.model_dump(mode="json"),
+                "run": {"command": command, "cwd": cwd, "timeout": timeout},
+            },
+        )
+        self._spawn(self.process_task(task.id))
+        return task
+
+    def submit_probe(self, *, cwd: str = "", language: str = "") -> Task:
+        request = AnalysisRequest(
+            text="environment probe",
+            source="probe",
+            language=language,
+            cwd=cwd,
+        )
+        task = self.store.create_task(
+            TaskKind.PROBE,
+            TargetRef(kind="workspace", name="local"),
+            request.model_dump(mode="json"),
+        )
+        self._spawn(self.process_task(task.id))
+        return task
+
+    def cancel_task(self, task_id: str) -> Task:
+        task = self.store.get_task(task_id)
+        if task.status not in {TaskStatus.QUEUED, TaskStatus.RUNNING, TaskStatus.WAITING_APPROVAL}:
+            raise ValueError(f"task cannot be cancelled from {task.status.value}")
+        for action in self.store.list_actions(task_id):
+            if action.status == ActionStatus.PENDING:
+                self.store.update_action(
+                    action.id,
+                    ActionStatus.REJECTED,
+                    {"ok": False, "reason": "task cancelled by operator"},
+                )
+        return self.store.update_task(task_id, TaskStatus.CANCELLED)
+
+    # ------------------------------------------------------------------
+    # MAPE-K state loop
+    # ------------------------------------------------------------------
+
+    async def process_task(self, task_id: str) -> None:
+        task = self.store.get_task(task_id)
+        if task.status != TaskStatus.QUEUED:
+            return
+        self.store.update_task(task_id, TaskStatus.RUNNING, phase=MapePhase.MONITOR)
+        try:
+            if task.kind == TaskKind.ANALYZE:
+                await self._run_analysis_graph(task_id)
+            elif task.kind == TaskKind.VERIFY:
+                await self._verify_task(task_id)
+            elif task.kind == TaskKind.PROBE:
+                await self._probe_task(task_id)
+            elif task.kind == TaskKind.KNOWLEDGE_RECORD:
+                await self._knowledge_task(task_id)
+            else:
+                raise ValueError(f"unsupported task kind: {task.kind.value}")
+        except Exception as exc:
+            current = self.store.get_task(task_id)
+            if current.status not in TERMINAL_TASK_STATUSES:
+                self.store.update_task(
+                    task_id, TaskStatus.FAILED, error=str(exc), phase=MapePhase.KNOWLEDGE, force=True
+                )
+
+    async def _run_analysis_graph(self, task_id: str) -> None:
+        config: RunnableConfig = RunnableConfig(configurable={"engine": self})
+        await self.analysis_graph.ainvoke({"task_id": task_id}, config=config)
+
+    async def _run_execution_graph(self, task_id: str, action_id: str) -> None:
+        config: RunnableConfig = RunnableConfig(configurable={"engine": self})
+        await self.execution_graph.ainvoke(
+            {"task_id": task_id, "action_id": action_id}, config=config
+        )
+
+    async def _verify_task(self, task_id: str) -> None:
+        """Run a verification command and analyze its output."""
+        self._mark_phase(task_id, MapePhase.MONITOR, "capturing verification input")
+        request, _env = await self._monitor(task_id)
+        run = self.store.get_task(task_id).input.get("run")
+        if not run:
+            raise ValueError("VERIFY task is missing run payload")
+
+        self._mark_phase(task_id, MapePhase.EXECUTE, "running verification command")
+        result = await self._run_command(run["command"], run.get("cwd"), run.get("timeout", 120))
+        obs = self.store.add_observation(
+            task_id,
+            "command_result",
+            "verify",
+            "ok" if result["returncode"] == 0 else "warning",
+            f"Verification command exited with code {result['returncode']}.",
+            result,
+        )
+
+        self._mark_phase(task_id, MapePhase.OBSERVE, "analyzing verification output")
+        for match in classify_error(result["stdout"] + "\n" + result["stderr"], result["returncode"])["findings"]:
+            self.store.add_finding(
+                task_id,
+                match["code"],
+                Severity(match["severity"]),
+                0.85,
+                match["meaning"],
+                f"Line {match['line']}: {match['text']}",
+                [obs.id],
+                match["remediation"],
+            )
+
+        await self._finish_analysis(
+            task_id,
+            {"codes": set(), "findings": []},
+            request,
+            summary=f"Verification command exited with code {result['returncode']}.",
+        )
+
+    async def _probe_task(self, task_id: str) -> None:
+        self._mark_phase(task_id, MapePhase.MONITOR, "capturing environment snapshot")
+        request = AnalysisRequest.model_validate(self.store.get_task(task_id).input)
+        env = self.probe.snapshot(cwd=request.cwd, language=request.language)
+        self.store.add_observation(
+            task_id,
+            "env_snapshot",
+            "EnvProbe",
+            "ok",
+            "Collected a safe view of the local execution environment.",
+            env.model_dump(mode="json"),
+        )
+        self.store.update_task(
+            task_id,
+            TaskStatus.SUCCEEDED,
+            phase=MapePhase.KNOWLEDGE,
+            report=self._build_report(task_id, "Environment snapshot completed."),
+        )
+
+    async def _knowledge_task(self, task_id: str) -> None:
+        self._mark_phase(task_id, MapePhase.KNOWLEDGE, "recording explicit knowledge")
+        task = self.store.get_task(task_id)
+        entry = task.input.get("knowledge", {})
+        self.store.add_knowledge(
+            task_id,
+            entry.get("kind", "note"),
+            entry.get("title", "Untitled"),
+            entry.get("content", {}),
+        )
+        self.store.update_task(
+            task_id,
+            TaskStatus.SUCCEEDED,
+            phase=MapePhase.KNOWLEDGE,
+            report=self._build_report(task_id, "Knowledge entry recorded."),
+        )
+
+    async def _monitor(self, task_id: str) -> tuple[AnalysisRequest, EnvSnapshot]:
+        task = self.store.get_task(task_id)
+        request_data = dict(task.input)
+        request_data.pop("run", None)
+        request = AnalysisRequest.model_validate(request_data)
+
+        # If this is a wrapped run, execute the command first.
+        run = task.input.get("run")
+        if run and task.kind == TaskKind.ANALYZE:
+            result = await self._run_command(run["command"], run.get("cwd"), run.get("timeout", 120))
+            request.text = "\n".join(part for part in [result["stdout"], result["stderr"]] if part)
+            request.exit_code = result["returncode"]
+
+        env = self.probe.snapshot(cwd=request.cwd, language=request.language)
+        self.store.add_observation(
+            task_id,
+            "analysis_input",
+            request.source,
+            "ok",
+            "Captured the submitted error context.",
+            {
+                **request.model_dump(mode="json"),
+                "env": env.model_dump(mode="json"),
+            },
+        )
+        return request, env
+
+    async def _finish_analysis(
+        self,
+        task_id: str,
+        classification: dict[str, Any],
+        request: AnalysisRequest,
+        summary: str | None = None,
+        llm_attribution: LLMAttribution | None = None,
+        retrieved_knowledge_ids: list[str] | None = None,
+    ) -> None:
+        self._mark_phase(task_id, MapePhase.KNOWLEDGE, "recording analysis outcome")
+        findings = self.store.list_findings(task_id)
+        if summary is None:
+            summary = f"Analysis found {len(findings)} likely issue(s)." if findings else "Analysis completed with no actionable findings."
+        self.store.add_knowledge(
+            task_id,
+            "analysis_summary",
+            summary,
+            {
+                "input": request.model_dump(mode="json"),
+                "codes": classification.get("codes", []),
+                "findings": [item.model_dump(mode="json") for item in findings],
+                "llm_attribution": llm_attribution.model_dump(mode="json") if llm_attribution else None,
+                "retrieved_knowledge_ids": retrieved_knowledge_ids or [],
+            },
+        )
+        self.store.update_task(
+            task_id,
+            TaskStatus.SUCCEEDED,
+            phase=MapePhase.KNOWLEDGE,
+            report=self._build_report(
+                task_id, summary, llm_attribution=llm_attribution, retrieved_knowledge_ids=retrieved_knowledge_ids
+            ),
+        )
+
+    async def _run_command(
+        self, command: list[str] | str, cwd: str | None = None, timeout: int = 120
+    ) -> dict[str, Any]:
+        if isinstance(command, str):
+            args = self._split_command(command)
+        else:
+            args = list(command)
+        if not args:
+            raise ValueError("command is empty")
+        resolved_cwd = cwd if cwd and Path(cwd).exists() else None
+        process = await asyncio.to_thread(
+            subprocess.run,
+            args,
+            capture_output=True,
+            text=True,
+            cwd=resolved_cwd,
+            shell=False,
+            timeout=timeout,
+            check=False,
+        )
+        return {
+            "command": subprocess.list2cmdline(args) if os.name == "nt" else shlex.join(args),
+            "cwd": resolved_cwd,
+            "returncode": process.returncode,
+            "stdout": process.stdout[-8000:],
+            "stderr": process.stderr[-8000:],
+        }
+
+    def _build_report(
+        self,
+        task_id: str,
+        summary: str,
+        *,
+        llm_attribution: LLMAttribution | None = None,
+        retrieved_knowledge_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        observations = self.store.list_observations(task_id)
+        findings = self.store.list_findings(task_id)
+        actions = self.store.list_actions(task_id)
+        report = AnalysisReport(
+            task_id=task_id,
+            summary=summary,
+            observation_count=len(observations),
+            finding_count=len(findings),
+            action_ids=[action.id for action in actions],
+            suggested_next_steps=[finding.remediation for finding in findings if finding.remediation][:5],
+            llm_attribution=llm_attribution,
+            retrieved_knowledge_ids=retrieved_knowledge_ids or [],
+        )
+        return report.model_dump(mode="json")
+
+    # ------------------------------------------------------------------
+    # Approval and execution
+    # ------------------------------------------------------------------
+
+    def decide_action(self, action_id: str, decision: ApprovalDecision) -> Any:
+        pending = self.store.get_action(action_id)
+        task = self.store.get_task(pending.task_id)
+        if task.status != TaskStatus.WAITING_APPROVAL:
+            raise ValueError(f"task is not waiting for approval: {task.status.value}")
+        try:
+            action = self.store.decide_action(action_id, decision.decision, decision.action_digest)
+        except ValueError:
+            expired = self.store.get_action(action_id)
+            if expired.status == ActionStatus.EXPIRED:
+                self.store.update_task(
+                    expired.task_id, TaskStatus.FAILED, error="action approval expired", force=True
+                )
+            raise
+        if decision.decision == "reject":
+            self.store.update_task(action.task_id, TaskStatus.CANCELLED)
+            return action
+        self.store.update_task(action.task_id, TaskStatus.EXECUTING, phase=MapePhase.EXECUTE)
+        self.store.update_action(action.id, ActionStatus.EXECUTING)
+        self._spawn(self._run_execution_graph(action.task_id, action.id))
+        return self.store.get_action(action.id)
+
+    async def _reconcile_task(self, task_id: str) -> None:
+        """Resume execution after a daemon restart."""
+        task = self.store.get_task(task_id)
+        if task.status == TaskStatus.RECONCILING and task.phase == MapePhase.EXECUTE:
+            pending_action = next(
+                (action for action in self.store.list_actions(task_id) if action.status == ActionStatus.APPROVED),
+                None,
+            )
+            if pending_action:
+                self._spawn(self._run_execution_graph(task_id, pending_action.id))
+            else:
+                self.store.update_task(task_id, TaskStatus.FAILED, error="no approved action to reconcile", force=True)
+        else:
+            self.store.update_task(task_id, TaskStatus.FAILED, error="unrecoverable state after restart", force=True)

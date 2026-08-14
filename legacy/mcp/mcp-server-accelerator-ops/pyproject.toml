@@ -1,8 +1,0 @@
-[project]
-name = "mcp-server-accelerator-ops"
-version = "0.1.0"
-description = "GPU/NPU accelerator diagnostics MCP server for AI Infra Ops Agent"
-requires-python = ">=3.12"
-dependencies = [
-    "mcp>=1.4.1",
-]

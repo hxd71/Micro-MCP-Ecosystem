@@ -16,9 +16,15 @@ wheels/
 
 # Runtime artifacts
 logs/
-.aiops/
+.termops/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 htmlcov/
 .coverage
+
+# Docker
+.dockerignore
+
+# Pre-commit
+.pre-commit-hooks.yaml

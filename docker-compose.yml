@@ -1,0 +1,25 @@
+services:
+  termops:
+    build: .
+    container_name: termops
+    ports:
+      - "8923:8923"
+    volumes:
+      - termops_data:/root/.termops
+      - ./src:/app/src:ro
+    environment:
+      - TERMOPS_LLM_PROVIDER=${TERMOPS_LLM_PROVIDER:-}
+      - TERMOPS_LLM_API_KEY=${TERMOPS_LLM_API_KEY:-}
+      - TERMOPS_LLM_MODEL=${TERMOPS_LLM_MODEL:-}
+      - TERMOPS_LLM_ENABLED=${TERMOPS_LLM_ENABLED:-false}
+      - TERMOPS_LLM_BASE_URL=${TERMOPS_LLM_BASE_URL:-}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8923/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  termops_data:

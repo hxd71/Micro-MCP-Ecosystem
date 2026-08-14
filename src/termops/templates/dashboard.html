@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="metric-grid" aria-label="节点关键指标">
+  <div class="metric">
+    <span>Orchestration</span>
+    <strong class="text-good">MAPE-K</strong>
+    <small>{{ capabilities.orchestration.framework }}</small>
+  </div>
+  <div class="metric">
+    <span>OS</span>
+    <strong>{{ capabilities.host.os }}</strong>
+    <small>{{ capabilities.host.python_executable or capabilities.host.python }}</small>
+  </div>
+  <div class="metric">
+    <span>Profile</span>
+    <strong class="{% if capabilities.profile == 'live' %}text-good{% else %}text-warn{% endif %}">{{ capabilities.profile }}</strong>
+    <small>{{ capabilities.llm.reason }}</small>
+  </div>
+  <div class="metric">
+    <span>LLM</span>
+    <strong class="{% if capabilities.llm.enabled %}text-good{% else %}text-warn{% endif %}">{{ "ON" if capabilities.llm.enabled else "OFF" }}</strong>
+    <small>{{ capabilities.llm.model or 'none' }}</small>
+  </div>
+</section>
+
+<div class="dashboard-grid">
+  <section class="panel span-2">
+    <div class="section-head"><div><p class="eyebrow">TASKS</p><h2>最近任务</h2></div><a href="/ui/tasks">查看全部</a></div>
+    <div class="timeline-list">
+    {% for task in tasks %}
+      <a class="timeline-item" href="/ui/tasks/{{ task.id }}">
+        <span class="status-dot {% if task.status.value in ['succeeded'] %}good{% elif task.status.value in ['failed','cancelled'] %}bad{% elif task.status.value == 'waiting_approval' %}warn{% endif %}"></span>
+        <span><strong>{{ task.kind.value }}</strong><small>{{ task.target.name }} · {{ task.created_at }}</small></span>
+        <span class="status-label {{ task.status.value }}">{{ task.status.value }}</span>
+      </a>
+    {% else %}<div class="empty-state compact"><p>还没有任务记录。</p></div>{% endfor %}
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="section-head"><div><p class="eyebrow">ENVIRONMENT</p><h2>环境探针</h2></div></div>
+    <div class="empty-state compact">
+      <p>CWD: {{ capabilities.host.cwd }}</p>
+      <p>Python: {{ capabilities.host.python }}</p>
+      <p>OS: {{ capabilities.host.os_release }}</p>
+    </div>
+  </section>
+
+  <section class="panel span-2">
+    <div class="section-head"><div><p class="eyebrow">QUICK START</p><h2>CLI 示例</h2></div></div>
+    <pre>termops analyze --text "ModuleNotFoundError: No module named 'click'"
+termops run -- python -m pytest
+termops task list
+termops action approve ACTION_ID</pre>
+  </section>
+
+  <section class="panel">
+    <div class="section-head"><div><p class="eyebrow">FINDINGS</p><h2>近期风险</h2></div><span class="count">{{ findings|length }}</span></div>
+    <div class="finding-list">
+    {% for finding in findings %}
+      <a href="/ui/tasks/{{ finding.task_id }}" class="finding-row">
+        <span class="severity {{ finding.severity.value }}">{{ finding.severity.value }}</span>
+        <span><strong>{{ finding.title }}</strong><small>{{ finding.code }}</small></span>
+      </a>
+    {% else %}<div class="empty-state compact"><p>当前没有 Finding。</p></div>{% endfor %}
+    </div>
+  </section>
+</div>
+{% endblock %}

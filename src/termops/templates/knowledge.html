@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="metric-grid" aria-label="知识统计">
+  <div class="metric">
+    <span>Total Entries</span>
+    <strong class="text-good">{{ stats.total }}</strong>
+    <small>FTS5: {{ "ON" if stats.fts_enabled else "OFF" }}</small>
+  </div>
+  {% for k in stats.by_kind[:3] %}
+  <div class="metric">
+    <span>{{ k.kind }}</span>
+    <strong>{{ k.count }}</strong>
+    <small>knowledge records</small>
+  </div>
+  {% endfor %}
+</section>
+
+<div class="dashboard-grid">
+  <section class="panel span-2">
+    <div class="section-head"><div><p class="eyebrow">SEARCH</p><h2>知识检索</h2></div></div>
+    <form method="get" action="/ui/knowledge" style="display:flex; gap:0.5rem; margin: 1rem 0;">
+      <input type="search" name="q" value="{{ query }}" placeholder="搜索错误码、关键词、修复方案..." style="flex:1;" />
+      <button type="submit">搜索</button>
+    </form>
+    {% if search_results %}
+    <div class="finding-table">
+    {% for item in search_results %}
+      <article>
+        <span class="severity low">{{ item.kind }}</span>
+        <div>
+          <h3>{{ item.title }}</h3>
+          <p>{{ item.content.get('summary', '') or item.content.get('codes', [])|join(', ') }}</p>
+          <small>{{ item.id[:12] }} · {{ item.created_at }}</small>
+        </div>
+      </article>
+    {% endfor %}
+    </div>
+    {% elif query %}
+    <div class="empty-state compact"><p>No results for "{{ query }}".</p></div>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <div class="section-head"><div><p class="eyebrow">RECENT</p><h2>近期知识</h2></div><span class="count">{{ stats.recent|length }}</span></div>
+    <div class="timeline-list">
+    {% for item in stats.recent %}
+      <div class="timeline-item">
+        <span class="status-dot good"></span>
+        <span><strong>{{ item.kind }}</strong><small>{{ item.title }} · {{ item.created_at[:19] }}</small></span>
+      </div>
+    {% endfor %}
+    </div>
+  </section>
+</div>
+
+<section class="panel section-gap">
+  <div class="section-head"><div><p class="eyebrow">ALL KNOWLEDGE</p><h2>全部知识条目</h2></div><span class="count">{{ items|length }}</span></div>
+  <div class="finding-table">
+  {% for item in items %}
+    <article>
+      <span class="severity low">{{ item.kind }}</span>
+      <div>
+        <h3>{{ item.title }}</h3>
+        <p>{{ item.content.get('summary', '') or item.content.get('codes', [])|join(', ') }}</p>
+        <small>{{ item.id[:12] }} · {{ item.created_at }}</small>
+      </div>
+    </article>
+  {% else %}
+    <div class="empty-state compact"><p>No knowledge entries yet. Run analyses to build up the knowledge base.</p></div>
+  {% endfor %}
+  </div>
+</section>
+{% endblock %}

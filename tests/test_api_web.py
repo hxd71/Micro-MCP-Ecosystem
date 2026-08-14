@@ -5,14 +5,14 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from aiops_agent.api import create_app
-from aiops_agent.engine import OpsEngine
-from aiops_agent.models import TargetRef, TaskKind, TaskStatus
-from aiops_agent.web import stream_task_events
+from termops.api import create_app
+from termops.engine import OpsEngine
+from termops.models import TargetRef, TaskKind, TaskStatus
+from termops.web import stream_task_events
 
 
 def auth(engine: OpsEngine) -> dict[str, str]:
-    return {"X-AIOPS-Token": engine.operator_token}
+    return {"X-Operator-Token": engine.operator_token}
 
 
 def test_api_requires_operator_token(settings) -> None:
@@ -23,11 +23,21 @@ def test_api_requires_operator_token(settings) -> None:
     engine.store.close()
 
 
-def test_web_login_diagnosis_and_csrf(settings, manifest_text: str) -> None:
+def test_generic_analysis_submission(settings) -> None:
     engine = OpsEngine(settings)
-    app = create_app(settings, engine)
-    with TestClient(app) as client:
-        response = client.post("/v1/tasks/deploy", headers=auth(engine), json={"manifest": manifest_text})
+    with TestClient(create_app(settings, engine)) as client:
+        response = client.post(
+            "/v1/tasks/analyze",
+            headers=auth(engine),
+            json={
+                "text": "ModuleNotFoundError: No module named 'requests'\n",
+                "source": "stderr",
+                "language": "python",
+                "command": "pytest -q",
+                "cwd": "/workspace/app",
+                "exit_code": 1,
+            },
+        )
         assert response.status_code == 202
         task_id = response.json()["id"]
         for _ in range(100):
@@ -35,6 +45,35 @@ def test_web_login_diagnosis_and_csrf(settings, manifest_text: str) -> None:
             if detail["task"]["status"] == "waiting_approval":
                 break
             time.sleep(0.01)
+        assert detail["task"]["status"] == "waiting_approval"
+        assert detail["actions"]
+        assert detail["actions"][0]["kind"] == "run_command"
+    engine.store.close()
+
+
+def test_generic_analysis_without_command_completes(settings) -> None:
+    engine = OpsEngine(settings)
+    with TestClient(create_app(settings, engine)) as client:
+        response = client.post(
+            "/v1/tasks/analyze",
+            headers=auth(engine),
+            json={
+                "text": "ModuleNotFoundError: No module named 'requests'\n",
+                "source": "stderr",
+                "language": "python",
+                "command": "",
+                "cwd": "/workspace/app",
+                "exit_code": 1,
+            },
+        )
+        assert response.status_code == 202
+        task_id = response.json()["id"]
+        for _ in range(100):
+            detail = client.get(f"/v1/tasks/{task_id}", headers=auth(engine)).json()
+            if detail["task"]["status"] == "waiting_approval":
+                break
+            time.sleep(0.01)
+        assert detail["task"]["status"] == "waiting_approval"
         action = detail["actions"][0]
         client.post(
             f"/v1/actions/{action['id']}/decision",
@@ -46,7 +85,37 @@ def test_web_login_diagnosis_and_csrf(settings, manifest_text: str) -> None:
             if detail["task"]["status"] == "succeeded":
                 break
             time.sleep(0.01)
+        assert detail["task"]["status"] == "succeeded"
+        task_knowledge = client.get(f"/v1/tasks/{task_id}/knowledge", headers=auth(engine)).json()
+        assert task_knowledge
+        global_knowledge = client.get("/v1/knowledge", headers=auth(engine)).json()
+        assert any(item["task_id"] == task_id for item in global_knowledge)
+    engine.store.close()
 
+
+def test_web_login_diagnosis_and_csrf(settings) -> None:
+    engine = OpsEngine(settings)
+    app = create_app(settings, engine)
+    with TestClient(app) as client:
+        # Submit an analysis task
+        response = client.post(
+            "/v1/tasks/analyze",
+            headers=auth(engine),
+            json={
+                "text": "ModuleNotFoundError: No module named 'click'\n",
+                "source": "stderr",
+                "language": "python",
+            },
+        )
+        assert response.status_code == 202
+        task_id = response.json()["id"]
+        for _ in range(100):
+            detail = client.get(f"/v1/tasks/{task_id}", headers=auth(engine)).json()
+            if detail["task"]["status"] in {"succeeded", "waiting_approval"}:
+                break
+            time.sleep(0.01)
+
+        # Login via web
         login = client.post("/v1/web/login-code", headers=auth(engine)).json()
         code = login["url"].split("code=", 1)[1]
         logged_in = client.get(f"/login?code={code}", follow_redirects=True)
@@ -54,39 +123,37 @@ def test_web_login_diagnosis_and_csrf(settings, manifest_text: str) -> None:
         assert "运行总览" in logged_in.text
         csrf = logged_in.text.split('name="csrf-token" content="', 1)[1].split('"', 1)[0]
 
-        assert client.post("/ui-api/diagnose", json={"service": "qwen-test"}).status_code == 403
-        diagnosed = client.post(
-            "/ui-api/diagnose",
+        # CSRF is required for web API
+        assert client.post("/ui-api/analyze", json={"text": "x"}).status_code == 403
+
+        # Analyze via web API with CSRF
+        analyzed = client.post(
+            "/ui-api/analyze",
             headers={"X-CSRF-Token": csrf},
-            json={"service": "qwen-test", "symptom": "503"},
+            json={"text": "ModuleNotFoundError: No module named 'x'", "language": "python"},
         )
-        assert diagnosed.status_code == 202
-        diagnosed_id = diagnosed.json()["task_id"]
-        for _ in range(100):
-            diagnosed_detail = client.get(f"/v1/tasks/{diagnosed_id}", headers=auth(engine)).json()
-            if diagnosed_detail["task"]["status"] in {"waiting_approval", "succeeded"}:
-                break
-            time.sleep(0.01)
-        task_page = client.get(diagnosed.json()["location"])
+        assert analyzed.status_code == 202
+
+        # View task page
+        task_page = client.get(analyzed.json()["location"])
         assert task_page.status_code == 200
-        assert "Observation" in task_page.text
-        if diagnosed_detail["actions"]:
-            pending = diagnosed_detail["actions"][0]
-            rejected = client.post(
-                f"/ui-api/actions/{pending['id']}/decision",
-                headers={"X-CSRF-Token": csrf},
-                json={"decision": "reject", "action_digest": pending["digest"]},
-            )
-            assert rejected.status_code == 200
-            assert rejected.json()["action"]["status"] == "rejected"
+        assert "Findings" in task_page.text or "findings" in task_page.text.lower()
     engine.store.close()
 
 
-def test_cancel_invalidates_pending_action(settings, manifest_text: str) -> None:
+def test_cancel_invalidates_pending_action(settings) -> None:
     engine = OpsEngine(settings)
     with TestClient(create_app(settings, engine)) as client:
         created = client.post(
-            "/v1/tasks/deploy", headers=auth(engine), json={"manifest": manifest_text}
+            "/v1/tasks/analyze",
+            headers=auth(engine),
+            json={
+                "text": "ModuleNotFoundError: No module named 'requests'\n",
+                "source": "stderr",
+                "language": "python",
+                "command": "python -c \"print('test')\"",
+                "exit_code": 1,
+            },
         ).json()
         for _ in range(100):
             detail = client.get(f"/v1/tasks/{created['id']}", headers=auth(engine)).json()
@@ -109,7 +176,6 @@ def test_cancel_invalidates_pending_action(settings, manifest_text: str) -> None
         )
         assert replay.status_code == 422
         assert "not waiting for approval" in replay.json()["detail"]
-        assert engine.docker.inspect_service("qwen-test")["found"] is False
     engine.store.close()
 
 
@@ -126,8 +192,8 @@ class ConnectedOnce:
 async def test_sse_stream_emits_auditable_task_updates(settings) -> None:
     engine = OpsEngine(settings)
     task = engine.store.create_task(
-        kind=TaskKind.DIAGNOSE,
-        target=TargetRef(kind="service", name="qwen-test"),
+        kind=TaskKind.ANALYZE,
+        target=TargetRef(kind="workspace", name="test"),
         input_data={},
     )
     engine.store.update_task(task.id, TaskStatus.RUNNING)

@@ -4,13 +4,13 @@ from datetime import datetime, timezone
 
 import pytest
 
-from aiops_agent.models import ActionStep, RiskLevel, TargetRef, TaskKind, TaskStatus
-from aiops_agent.store import StateStore
+from termops.models import ActionStep, RiskLevel, TargetRef, TaskKind, TaskStatus
+from termops.store import StateStore
 
 
 def test_task_transition_and_audit_chain(settings) -> None:
     store = StateStore(settings.database_path)
-    task = store.create_task(TaskKind.DIAGNOSE, TargetRef(kind="service", name="qwen"), {})
+    task = store.create_task(TaskKind.ANALYZE, TargetRef(kind="workspace", name="test"), {})
     store.update_task(task.id, TaskStatus.RUNNING)
     store.update_task(task.id, TaskStatus.SUCCEEDED, report={"summary": "ok"})
     assert store.get_task(task.id).status == TaskStatus.SUCCEEDED
@@ -21,18 +21,18 @@ def test_task_transition_and_audit_chain(settings) -> None:
 
 def test_action_digest_is_single_use_and_bound(settings) -> None:
     store = StateStore(settings.database_path)
-    task = store.create_task(TaskKind.DEPLOY, TargetRef(kind="service", name="qwen"), {})
+    task = store.create_task(TaskKind.ANALYZE, TargetRef(kind="workspace", name="test"), {})
     store.update_task(task.id, TaskStatus.RUNNING)
     action = store.create_action(
         task.id,
-        "deploy",
-        "qwen",
+        "run_command",
+        "python -c 'print(1)'",
         RiskLevel.HIGH,
-        {"image": "pinned"},
-        [ActionStep(order=1, action="deploy", description="deploy")],
-        ["preflight"],
-        ["health"],
-        ["rollback"],
+        {"command": "python -c 'print(1)'"},
+        [ActionStep(order=1, action="run_command", description="Run verification command")],
+        [],
+        [],
+        [],
         900,
     )
     with pytest.raises(ValueError, match="digest mismatch"):
@@ -45,14 +45,14 @@ def test_action_digest_is_single_use_and_bound(settings) -> None:
 
 def test_expired_approval_is_rejected(settings) -> None:
     store = StateStore(settings.database_path)
-    task = store.create_task(TaskKind.DEPLOY, TargetRef(kind="service", name="qwen"), {})
+    task = store.create_task(TaskKind.ANALYZE, TargetRef(kind="workspace", name="test"), {})
     action = store.create_action(
         task.id,
-        "deploy",
-        "qwen",
+        "run_command",
+        "python -c 'print(1)'",
         RiskLevel.HIGH,
-        {},
-        [ActionStep(order=1, action="deploy", description="deploy")],
+        {"command": "python -c 'print(1)'"},
+        [ActionStep(order=1, action="run_command", description="Run verification command")],
         [],
         [],
         [],
