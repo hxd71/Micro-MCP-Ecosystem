@@ -579,6 +579,133 @@ def config_llm(
         click.echo("No changes specified. Use --help to see available options.")
 
 
+# ── Evaluation ────────────────────────────────────────────────────────────────
+
+
+@cli.group()
+def eval() -> None:
+    """Evaluate agent accuracy on benchmark datasets.
+
+    Multi-tier evaluation following AgentBench (Liu et al., 2024, ICLR):
+    Tier 1: Error code classification (Precision/Recall/F1)
+    Tier 2: Root cause semantic similarity (BLEU, ROUGE-L)
+    Tier 3: Action safety & validity
+    Tier 4: End-to-end performance
+    """
+
+
+@eval.command("rule")
+@click.option("--dataset", "-d", default="terminal_errors", help="Dataset name or path to JSONL.")
+@click.pass_context
+def eval_rule(ctx: click.Context, dataset: str) -> None:
+    """Evaluate the deterministic rule engine on a dataset."""
+    from .eval import EvalEngine, load_dataset, load_dataset_from_jsonl
+
+    if Path(dataset).exists():
+        samples = load_dataset_from_jsonl(dataset)
+    else:
+        try:
+            samples = load_dataset(dataset)
+        except ValueError as e:
+            raise click.ClickException(str(e)) from e
+
+    engine = EvalEngine()
+    results = engine.evaluate_rule(samples)
+    summary = engine.summarize(results)
+
+    click.echo(f"Dataset: {dataset} ({len(samples)} samples)")
+    click.echo(f"Code Accuracy: {summary.classification.accuracy:.1%}")
+    click.echo(f"Micro F1: {summary.classification.micro_f1:.3f}")
+    click.echo(f"Macro F1: {summary.classification.macro_f1:.3f}")
+    click.echo(f"Avg BLEU-1: {summary.avg_bleu_1:.3f}")
+    click.echo(f"Avg ROUGE-L: {summary.avg_rouge_l:.3f}")
+    click.echo(f"Avg Latency: {summary.avg_latency_ms:.0f} ms")
+    click.echo(f"Safety Violations: {summary.safety_violation_count}")
+
+    # Per-category
+    click.echo("\nPer-category:")
+    for cat in sorted(summary.per_category):
+        m = summary.per_category[cat]
+        click.echo(f"  {cat}: {m['accuracy']:.1%} ({int(m['count'])} samples)")
+
+
+@eval.command("run")
+@click.option("--dataset", "-d", default="terminal_errors", help="Dataset name or path to JSONL.")
+@click.option("--runs", "-n", default=1, type=int, help="Number of LLM runs for stochastic evaluation.")
+@click.option("--output", "-o", default=None, help="Write Markdown report to file.")
+@click.pass_context
+def eval_run(ctx: click.Context, dataset: str, runs: int, output: str | None) -> None:
+    """Run full evaluation including LLM attribution (if configured)."""
+    from .eval import EvalEngine, load_dataset, load_dataset_from_jsonl
+
+    if Path(dataset).exists():
+        samples = load_dataset_from_jsonl(dataset)
+    else:
+        try:
+            samples = load_dataset(dataset)
+        except ValueError as e:
+            raise click.ClickException(str(e)) from e
+
+    engine = EvalEngine()
+
+    # Rule engine evaluation (always deterministic)
+    click.echo("=== Rule Engine Evaluation ===")
+    rule_results = engine.evaluate_rule(samples)
+    rule_summary = engine.summarize(rule_results)
+
+    click.echo(f"Code Accuracy: {rule_summary.classification.accuracy:.1%}")
+    click.echo(f"Micro F1: {rule_summary.classification.micro_f1:.3f}")
+    click.echo(f"Macro F1: {rule_summary.classification.macro_f1:.3f}")
+    click.echo(f"Avg BLEU-1: {rule_summary.avg_bleu_1:.3f}")
+    click.echo(f"Avg ROUGE-L: {rule_summary.avg_rouge_l:.3f}")
+    click.echo(f"Avg Latency: {rule_summary.avg_latency_ms:.0f} ms")
+    click.echo(f"Safety Violations: {rule_summary.safety_violation_count}")
+
+    # LLM evaluation (if configured)
+    settings = _settings_ctx(ctx)
+    if settings.llm_enabled:
+        click.echo(f"\n=== LLM Evaluation ({runs} runs) ===")
+        import asyncio
+
+        from .llm_client import LLMClient
+
+        llm = LLMClient(settings.llm_config)
+        engine = EvalEngine(llm_client=llm)
+
+        try:
+            all_results = asyncio.get_event_loop().run_until_complete(
+                engine.evaluate_llm(samples, runs=runs)
+            )
+        except RuntimeError:
+            all_results = asyncio.run(engine.evaluate_llm(samples, runs=runs))
+
+        llm_summary = engine.summarize_llm(all_results)
+        click.echo(f"Code Accuracy (mean): {llm_summary['code_accuracy_mean']:.1%}")
+        click.echo(f"Code Accuracy (std):  {llm_summary['code_accuracy_std']:.3f}")
+        click.echo(f"ROUGE-L (mean): {llm_summary['rouge_l_mean']:.3f}")
+        click.echo(f"ROUGE-L (std):  {llm_summary['rouge_l_std']:.3f}")
+        click.echo(f"Latency (mean): {llm_summary['latency_ms_mean']:.0f} ms")
+        click.echo(f"Latency (std):  {llm_summary['latency_ms_std']:.0f} ms")
+    else:
+        click.echo("\nLLM not configured. Set TERMOPS_LLM_ENABLED=true to enable LLM evaluation.")
+
+    # Write report
+    if output:
+        report = rule_summary.to_markdown()
+        Path(output).write_text(report, encoding="utf-8")
+        click.echo(f"\nReport saved to: {output}")
+
+
+@eval.command("list")
+def eval_list() -> None:
+    """List available built-in evaluation datasets."""
+    from .eval import list_datasets
+
+    for name in list_datasets():
+        click.echo(f"  {name}")
+
+
+
 def main() -> None:
     cli()
 
