@@ -32,8 +32,8 @@ Termops 把这个循环自动化。它是一个跑在本机的守护进程，接
 ### 安装
 
 ```bash
-git clone https://github.com/user/termops.git
-cd termops
+git clone https://github.com/hxd71/Termops.git
+cd Termops
 python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
@@ -122,7 +122,7 @@ export TERMOPS_LLM_ENABLED=true
 | `ollama` | — | `qwen2.5:7b` | `http://localhost:11434/v1` |
 | `openai_compatible` | `LLM_API_KEY` | （自定） | `http://localhost:8080/v1` |
 
-Key 只落在本地配置文件或环境变量里：不写日志、不存数据库、不出现在任何 API 响应中。
+Key 以明文存于 `~/.termops/config.toml`（写入时自动 `chmod 0600`）或环境变量 `TERMOPS_LLM_API_KEY`，二选一：不写日志、不存数据库、不出现在任何 API 响应中。
 
 ---
 

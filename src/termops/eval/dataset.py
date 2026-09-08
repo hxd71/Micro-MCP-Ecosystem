@@ -23,7 +23,6 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator
 
 
 @dataclass
@@ -111,7 +110,12 @@ _TERMINAL_ERRORS = [
     ),
     EvalSample(
         id="terr_006",
-        text="ERROR: Cannot install torch==2.0.0 and torchvision==0.15.0 because these package versions have conflicting dependencies.\n\nThe conflict is caused by:\n    torch 2.0.0 depends on typing-extensions\n    torchvision 0.15.0 depends on torch==2.0.0",
+        text=(
+            "ERROR: Cannot install torch==2.0.0 and torchvision==0.15.0 because "
+            "these package versions have conflicting dependencies.\n\n"
+            "The conflict is caused by:\n    torch 2.0.0 depends on typing-extensions\n"
+            "    torchvision 0.15.0 depends on torch==2.0.0"
+        ),
         expected_code="DEPENDENCY_CONFLICT",
         expected_root_cause="Installed dependencies have incompatible version requirements.",
         expected_command="pip install torch torchvision --no-deps",
@@ -152,7 +156,11 @@ _TERMINAL_ERRORS = [
     ),
     EvalSample(
         id="terr_010",
-        text="Auto-merging src/app.py\nCONFLICT (content): Merge conflict in src/app.py\nAutomatic merge failed; fix conflicts and then commit the result.",
+        text=(
+            "Auto-merging src/app.py\n"
+            "CONFLICT (content): Merge conflict in src/app.py\n"
+            "Automatic merge failed; fix conflicts and then commit the result."
+        ),
         expected_code="GIT_MERGE_CONFLICT",
         expected_root_cause="A git merge or rebase encountered conflicts.",
         expected_command="",
@@ -162,7 +170,12 @@ _TERMINAL_ERRORS = [
     ),
     EvalSample(
         id="terr_011",
-        text="To https://github.com/user/repo.git\n ! [rejected]        main -> main (non-fast-forward)\nerror: failed to push some refs to 'https://github.com/user/repo.git'\nhint: Updates were rejected because the remote contains work that you do not have locally.",
+        text=(
+            "To https://github.com/user/repo.git\n"
+            " ! [rejected]        main -> main (non-fast-forward)\n"
+            "error: failed to push some refs to 'https://github.com/user/repo.git'\n"
+            "hint: Updates were rejected because the remote contains work that you do not have locally."
+        ),
         expected_code="GIT_REMOTE_REJECTED",
         expected_root_cause="A git push was rejected by the remote.",
         expected_command="git pull --rebase origin main",
@@ -172,7 +185,11 @@ _TERMINAL_ERRORS = [
     ),
     EvalSample(
         id="terr_012",
-        text="git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.\nPlease make sure you have the correct access rights and the repository exists.",
+        text=(
+            "git@github.com: Permission denied (publickey).\n"
+            "fatal: Could not read from remote repository.\n"
+            "Please make sure you have the correct access rights and the repository exists."
+        ),
         expected_code="GIT_AUTH_FAILED",
         expected_root_cause="Git authentication to the remote repository failed.",
         expected_command="",
@@ -193,7 +210,11 @@ _TERMINAL_ERRORS = [
     ),
     EvalSample(
         id="terr_014",
-        text="Error response from daemon: pull access denied for private/image, repository does not exist or may require 'docker login': denied: requested access to the resource is denied",
+        text=(
+            "Error response from daemon: pull access denied for private/image, "
+            "repository does not exist or may require 'docker login': denied: "
+            "requested access to the resource is denied"
+        ),
         expected_code="DOCKER_IMAGE_NOT_FOUND",
         expected_root_cause="A Docker image or repository could not be located.",
         expected_command="docker login",
@@ -306,7 +327,14 @@ _TERMINAL_ERRORS = [
     # ── Package / Build ────────────────────────────────────────────────
     EvalSample(
         id="terr_025",
-        text="npm ERR! code ENOENT\nnpm ERR! syscall open\nnpm ERR! path /home/user/package.json\nnpm ERR! errno -2\nnpm ERR! enoent Could not read package.json: Error: ENOENT: no such file or directory, open '/home/user/package.json'",
+        text=(
+            "npm ERR! code ENOENT\n"
+            "npm ERR! syscall open\n"
+            "npm ERR! path /home/user/package.json\n"
+            "npm ERR! errno -2\n"
+            "npm ERR! enoent Could not read package.json: Error: ENOENT: "
+            "no such file or directory, open '/home/user/package.json'"
+        ),
         expected_code="FILE_NOT_FOUND",
         expected_root_cause="A referenced file or path was missing.",
         expected_command="",
@@ -316,7 +344,11 @@ _TERMINAL_ERRORS = [
     ),
     EvalSample(
         id="terr_026",
-        text="error: command 'gcc' failed with exit status 1\n\nsrc/_cffi_backend.c:15:10: fatal error: Python.h: No such file or directory\n #include <Python.h>\n          ^~~~~~~~~~~\ncompilation terminated.",
+        text=(
+            "error: command 'gcc' failed with exit status 1\n\n"
+            "src/_cffi_backend.c:15:10: fatal error: Python.h: No such file or directory\n"
+            " #include <Python.h>\n          ^~~~~~~~~~~\ncompilation terminated."
+        ),
         expected_code="BUILD_FAILURE",
         expected_root_cause="A build or compilation step failed.",
         expected_command="apt-get install python3-dev",

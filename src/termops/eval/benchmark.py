@@ -28,16 +28,15 @@ Usage:
 
 from __future__ import annotations
 
-import math
 import re
 import statistics
 import time
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 from .dataset import EvalSample
-
 
 # ---------------------------------------------------------------------------
 # Tier 1 metrics — Error Classification (Manning et al., 2008)
@@ -74,19 +73,18 @@ def _compute_classification_metrics(
     """
     per_class: dict[str, dict[str, float]] = {}
     for cls in classes:
-        tp = sum(1 for t, p in zip(y_true, y_pred) if t == cls and p == cls)
-        fp = sum(1 for t, p in zip(y_true, y_pred) if t != cls and p == cls)
-        fn = sum(1 for t, p in zip(y_true, y_pred) if t == cls and p != cls)
+        tp = sum(1 for t, p in zip(y_true, y_pred, strict=False) if t == cls and p == cls)
+        fp = sum(1 for t, p in zip(y_true, y_pred, strict=False) if t != cls and p == cls)
+        fn = sum(1 for t, p in zip(y_true, y_pred, strict=False) if t == cls and p != cls)
         precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
         recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
         f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
         per_class[cls] = {"precision": precision, "recall": recall, "f1": f1, "support": tp + fn}
 
     # Micro-averaging: pool all tp/fp/fn across classes
-    total_tp = sum(per_class[c]["support"] * per_class[c]["recall"] for c in classes)
     n = len(y_true)
     if n > 0:
-        micro_precision = sum(1 for t, p in zip(y_true, y_pred) if t == p) / n
+        micro_precision = sum(1 for t, p in zip(y_true, y_pred, strict=False) if t == p) / n
         micro_recall = micro_precision  # for multi-class, micro P = micro R = accuracy
         micro_f1 = micro_precision
         accuracy = micro_precision
@@ -217,9 +215,7 @@ def _command_is_syntactically_valid(command: str) -> bool:
     """Basic syntactic validity check — non-empty, no control chars."""
     if not command or not command.strip():
         return False
-    if any(ord(c) < 32 and c not in "\n\r\t" for c in command):
-        return False
-    return True
+    return not any(ord(c) < 32 and c not in "\n\r\t" for c in command)
 
 
 # ---------------------------------------------------------------------------
@@ -468,7 +464,7 @@ class EvalEngine:
             raise ValueError("LLM client is required for LLM evaluation")
 
         all_results: list[list[EvalResult]] = []
-        for run_idx in range(runs):
+        for _run_idx in range(runs):
             run_results: list[EvalResult] = []
             for sample in dataset:
                 t0 = time.perf_counter()

@@ -53,8 +53,9 @@ erra = "termops.cli:main"
 erra-agent = "termops.daemon:main"
 
 [project.urls]
-Homepage = "https://github.com/user/termops"
-Repository = "https://github.com/user/termops"
+Homepage = "https://github.com/hxd71/Termops"
+Repository = "https://github.com/hxd71/Termops"
+Issues = "https://github.com/hxd71/Termops/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/termops"]

@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
-import shlex
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -15,7 +14,7 @@ import click
 import httpx
 
 from .config import Settings
-from .llm import LLMProvider, PROVIDER_DEFAULTS
+from .llm import LLMProvider
 
 TERMINAL_STATUSES = {"succeeded", "failed", "cancelled"}
 
@@ -63,7 +62,13 @@ def _style_severity(sev: str) -> str:
 
 
 def _style_status(status: str) -> str:
-    colors = {"succeeded": "green", "waiting_approval": "yellow", "failed": "red", "running": "cyan", "cancelled": "magenta"}
+    colors = {
+        "succeeded": "green",
+        "waiting_approval": "yellow",
+        "failed": "red",
+        "running": "cyan",
+        "cancelled": "magenta",
+    }
     fg = colors.get(status, "white")
     return click.style(status, fg=fg, bold=True)
 
@@ -230,7 +235,11 @@ def doctor(ctx: click.Context) -> None:
         click.echo(click.style("Profile", bold=True) + f":  {result.get('profile', '-')}")
         llm = result.get("llm", {})
         provider = llm.get("provider", "none")
-        llm_status = click.style("enabled", fg="green") if llm.get("enabled") else click.style("disabled", fg="bright_black")
+        llm_status = (
+            click.style("enabled", fg="green")
+            if llm.get("enabled")
+            else click.style("disabled", fg="bright_black")
+        )
         click.echo(click.style("LLM", bold=True) + f":     {llm_status} ({provider}/{llm.get('model') or 'none'})")
         host = result.get("host", {})
         click.echo(click.style("OS", bold=True) + f":      {host.get('os', '-')} / {host.get('arch', '-')}")
@@ -409,7 +418,10 @@ def hook_install(ctx: click.Context) -> None:
         shell = "powershell"
         script = hooks_dir / "hook.ps1"
         profile_path = Path(
-            os.environ.get("PROFILE", str(Path.home() / "Documents" / "WindowsPowerShell" / "Microsoft.PowerShell_profile.ps1"))
+            os.environ.get(
+                "PROFILE",
+                str(Path.home() / "Documents" / "WindowsPowerShell" / "Microsoft.PowerShell_profile.ps1"),
+            )
         )
         source_line = f'. "{script.as_posix()}"'
     else:
@@ -498,7 +510,12 @@ def config_show(ctx: click.Context) -> None:
 
 
 @config.command("llm")
-@click.option("--provider", type=click.Choice([p.value for p in LLMProvider]), default=None, help="LLM provider (openai, anthropic, ollama, openai_compatible)")
+@click.option(
+    "--provider",
+    type=click.Choice([p.value for p in LLMProvider]),
+    default=None,
+    help="LLM provider (openai, anthropic, ollama, openai_compatible)",
+)
 @click.option("--model", default=None, help="Model name (e.g. gpt-4o, claude-sonnet-4-20250514, qwen2.5:7b)")
 @click.option("--api-key", default=None, help="API key for the provider")
 @click.option("--base-url", default=None, help="Override the default base URL")
@@ -574,6 +591,10 @@ def config_llm(
         lines.append("")
 
         config_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        # The file may contain an API key: restrict to owner-only on POSIX.
+        # On Windows chmod only toggles the read-only bit, which is a no-op here.
+        with contextlib.suppress(OSError):
+            config_path.chmod(0o600)
         click.echo(f"\nConfiguration saved to: {config_path}")
     else:
         click.echo("No changes specified. Use --help to see available options.")
@@ -663,13 +684,13 @@ def eval_run(ctx: click.Context, dataset: str, runs: int, output: str | None) ->
 
     # LLM evaluation (if configured)
     settings = _settings_ctx(ctx)
-    if settings.llm_enabled:
+    if settings.llm.enabled:
         click.echo(f"\n=== LLM Evaluation ({runs} runs) ===")
         import asyncio
 
         from .llm_client import LLMClient
 
-        llm = LLMClient(settings.llm_config)
+        llm = LLMClient(settings.llm)
         engine = EvalEngine(llm_client=llm)
 
         try:

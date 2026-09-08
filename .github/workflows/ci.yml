@@ -20,13 +20,19 @@ jobs:
       - run: mypy src/termops
 
   test:
-    name: Test (Python ${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    name: Test (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
     needs: lint
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest]
         python-version: ["3.10", "3.11", "3.12"]
+        include:
+          # Windows is a first-class target (hook.ps1, list2cmdline paths) —
+          # keep it under CI, on the primary Python version.
+          - os: windows-latest
+            python-version: "3.12"
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6

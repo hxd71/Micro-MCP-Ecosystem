@@ -4,7 +4,7 @@ FROM python:3.12-slim
 
 LABEL org.opencontainers.image.title="Termops"
 LABEL org.opencontainers.image.description="Terminal-native AI agent for error analysis and remediation"
-LABEL org.opencontainers.image.url="https://github.com/user/termops"
+LABEL org.opencontainers.image.url="https://github.com/hxd71/Termops"
 
 WORKDIR /app
 

@@ -15,7 +15,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal, cast
 
-from .llm import LLMConfig, LLMProvider, PROVIDER_DEFAULTS
+from .llm import PROVIDER_DEFAULTS, LLMConfig, LLMProvider
 
 Profile = Literal["live", "test", "demo"]
 
@@ -104,7 +104,12 @@ class Settings:
         home = Path(
             os.environ.get("TERMOPS_HOME", os.environ.get("ERRA_HOME", Path.home() / ".termops"))
         ).resolve()
-        settings = cls(profile=cast(Profile, selected_profile), state_dir=home, config_dir=home / "config", run_dir=home / "run")
+        settings = cls(
+            profile=cast(Profile, selected_profile),
+            state_dir=home,
+            config_dir=home / "config",
+            run_dir=home / "run",
+        )
 
         def _env(key: str, default: str = "") -> str:
             return os.environ.get(key, default)

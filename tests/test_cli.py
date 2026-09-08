@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
-import threading
 import time
 from pathlib import Path
 from unittest.mock import patch
@@ -25,14 +24,6 @@ def runner() -> CliRunner:
     return CliRunner()
 
 
-def _start_event_loop() -> asyncio.AbstractEventLoop:
-    """Start an asyncio event loop in a background thread so spawned tasks run."""
-    loop = asyncio.new_event_loop()
-    thread = threading.Thread(target=loop.run_forever, daemon=True)
-    thread.start()
-    return loop
-
-
 def _make_client(engine: OpsEngine) -> TestClient:
     """Create a FastAPI TestClient for the engine, then wrap it inside a mock AgentClient."""
     app = create_app(engine.settings, engine)
@@ -50,7 +41,8 @@ def _mock_request(engine: OpsEngine, tc: TestClient, method: str, path: str, jso
     resp = tc.request(method, path, **kwargs)
     if resp.is_error:
         from click import ClickException
-        detail = resp.json().get("detail", resp.text) if resp.headers.get("content-type", "").startswith("application/json") else resp.text
+        is_json = resp.headers.get("content-type", "").startswith("application/json")
+        detail = resp.json().get("detail", resp.text) if is_json else resp.text
         raise ClickException(f"agent returned HTTP {resp.status_code}: {detail}")
     return resp.json()
 
@@ -78,10 +70,6 @@ def _wait_for_status(client: TestClient, engine: OpsEngine, task_id: str, expect
     actual = detail["task"]["status"]
     error = detail["task"].get("error", "")
     raise AssertionError(f"Task {task_id} did not reach {expected}; actual status={actual!r} error={error!r}")
-
-def _process_task_sync(engine: OpsEngine, task_id: str) -> None:
-    """Run the task processing coroutine synchronously."""
-    asyncio.run(engine.process_task(task_id))
 
 
 class TestAnalyzeCommand:
@@ -299,14 +287,23 @@ class TestTaskCommands:
         engine.store.close()
 
     def test_task_watch(self, runner, settings):
-        from termops.store import TaskKind as TK
         from termops.models import TargetRef
+        from termops.store import TaskKind
         engine = OpsEngine(settings)
         tc = _make_client(engine)
         task = engine.store.create_task(
-            TK.ANALYZE,
+            TaskKind.ANALYZE,
             TargetRef(kind="terminal", name="test"),
-            {"text": "ModuleNotFoundError: No module named 'click'", "source": "stderr", "language": "python", "command": "", "cwd": "", "exit_code": None, "files": [], "history_task_ids": []},
+            {
+                "text": "ModuleNotFoundError: No module named 'click'",
+                "source": "stderr",
+                "language": "python",
+                "command": "",
+                "cwd": "",
+                "exit_code": None,
+                "files": [],
+                "history_task_ids": [],
+            },
         )
         task_id = task.id
         asyncio.run(engine.process_task(task_id))
@@ -324,13 +321,12 @@ class TestActionCommands:
     """Test the `erra action approve/reject` commands."""
 
     def test_action_approve(self, runner, settings):
-        from termops.models import ApprovalDecision
-        from termops.store import TaskKind as TK
         from termops.models import TargetRef
+        from termops.store import TaskKind
         engine = OpsEngine(settings)
         tc = _make_client(engine)
         task = engine.store.create_task(
-            TK.ANALYZE,
+            TaskKind.ANALYZE,
             TargetRef(kind="terminal", name="test"),
             {"text": "ModuleNotFoundError: No module named 'requests'", "source": "stderr", "language": "python", "command": f'"{sys.executable}" -c "print(1)"', "cwd": "", "exit_code": 1, "files": [], "history_task_ids": []},
         )
@@ -352,12 +348,12 @@ class TestActionCommands:
         engine.store.close()
 
     def test_action_reject(self, runner, settings):
-        from termops.store import TaskKind as TK
         from termops.models import TargetRef
+        from termops.store import TaskKind
         engine = OpsEngine(settings)
         tc = _make_client(engine)
         task = engine.store.create_task(
-            TK.ANALYZE,
+            TaskKind.ANALYZE,
             TargetRef(kind="terminal", name="test"),
             {"text": "ModuleNotFoundError: No module named 'requests'", "source": "stderr", "language": "python", "command": f'"{sys.executable}" -c "print(1)"', "cwd": "", "exit_code": 1, "files": [], "history_task_ids": []},
         )

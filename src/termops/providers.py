@@ -54,7 +54,7 @@ def capture_env_snapshot(
     path = os.environ.get("PATH", "")
     return EnvSnapshot(
         cwd=raw_cwd,
-        shell=os.environ.get("SHELL", os.environ.get("ComSpec", "")),
+        shell=os.environ.get("SHELL", os.environ.get("COMSPEC", "")),
         path_entries=[entry for entry in path.split(os.pathsep) if entry],
         python_version=sys.version.replace("\n", " "),
         os_name=f"{platform.system()} {platform.release()}",

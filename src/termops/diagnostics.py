@@ -11,7 +11,6 @@ from typing import Any
 
 from .models import Severity
 
-
 ErrorPattern = tuple[tuple[str, ...], Severity, str, str]
 
 GENERIC_ERROR_PATTERNS: dict[str, ErrorPattern] = {

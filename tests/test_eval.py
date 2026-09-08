@@ -31,7 +31,6 @@ from termops.eval.dataset import (
     load_dataset_from_jsonl,
 )
 
-
 # ── Dataset loading ────────────────────────────────────────────────────
 
 

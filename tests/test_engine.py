@@ -127,7 +127,8 @@ async def test_analysis_rejects_approval_decision(settings) -> None:
     await wait_for_status(engine, task.id, {TaskStatus.WAITING_APPROVAL})
     action = engine.store.list_actions(task.id)[0]
     engine.decide_action(action.id, ApprovalDecision(decision="reject", action_digest=action.digest))
-    assert await wait_for_status(engine, task.id, {TaskStatus.CANCELLED, TaskStatus.SUCCEEDED}) in {TaskStatus.CANCELLED, TaskStatus.SUCCEEDED}
+    terminal_statuses = {TaskStatus.CANCELLED, TaskStatus.SUCCEEDED}
+    assert await wait_for_status(engine, task.id, terminal_statuses) in terminal_statuses
     action_after = engine.store.get_action(action.id)
     assert action_after.status.value == "rejected"
     await engine.stop()

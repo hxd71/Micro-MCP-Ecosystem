@@ -11,7 +11,9 @@ import asyncio
 import os
 import shlex
 import subprocess
-from collections.abc import Coroutine
+from collections.abc import Callable, Coroutine
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +43,12 @@ from .providers import EnvProbe
 from .security import new_token
 from .store import StateStore
 
+# Cap concurrent MAPE-K task executions so a burst of submissions cannot exhaust
+# the event loop or the LLM provider's rate limit. Bounded at the same level as
+# the database worker pool to keep resource contention predictable.
+MAX_CONCURRENT_TASKS = 8
+DB_WORKERS = 8
+
 
 class OpsEngine:
     """Local error analysis engine with approval-gated action execution."""
@@ -56,6 +64,11 @@ class OpsEngine:
         self.store = store or StateStore(settings.database_path)
         self.probe = probe or EnvProbe(env_allowlist=settings.env_allowlist)
         self._jobs: set[asyncio.Task[Any]] = set()
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._task_semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
+        self._db_executor = ThreadPoolExecutor(
+            max_workers=DB_WORKERS, thread_name_prefix="termops-db"
+        )
         self._analysis_graph: Any | None = None
         self._execution_graph: Any | None = None
         self.llm = LLMClient(settings.llm)
@@ -84,7 +97,13 @@ class OpsEngine:
         return token
 
     async def start(self) -> None:
-        for task in self.store.list_tasks(limit=500):
+        self._loop = asyncio.get_running_loop()
+        recoverable = {
+            TaskStatus.EXECUTING,
+            TaskStatus.VERIFYING,
+            TaskStatus.QUEUED,
+        }
+        for task in self.store.list_tasks(limit=None, statuses=recoverable):
             if task.status in {TaskStatus.EXECUTING, TaskStatus.VERIFYING}:
                 self.store.update_task(task.id, TaskStatus.RECONCILING, force=True)
                 self._spawn(self._reconcile_task(task.id))
@@ -96,15 +115,33 @@ class OpsEngine:
             job.cancel()
         if self._jobs:
             await asyncio.gather(*self._jobs, return_exceptions=True)
+        self._db_executor.shutdown(wait=True, cancel_futures=True)
 
     def _spawn(self, coroutine: Coroutine[Any, Any, Any]) -> None:
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = asyncio.get_event_loop()
-        job = loop.create_task(coroutine)
+        """Schedule a tracked task on the owning event loop, from any thread."""
+        loop = self._loop
+        if loop is None or loop.is_closed():
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = asyncio.get_event_loop()
+        if not loop.is_running():
+            raise RuntimeError("cannot spawn task: no running event loop")
+        loop.call_soon_threadsafe(self._track_task, self._gated(coroutine))
+
+    def _track_task(self, coroutine: Coroutine[Any, Any, Any]) -> None:
+        job = asyncio.get_running_loop().create_task(coroutine)
         self._jobs.add(job)
         job.add_done_callback(self._jobs.discard)
+
+    async def _gated(self, coroutine: Coroutine[Any, Any, Any]) -> None:
+        async with self._task_semaphore:
+            await coroutine
+
+    async def _db(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        """Run a blocking store call in the DB worker pool, off the event loop."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(self._db_executor, partial(func, *args, **kwargs))
 
     @staticmethod
     def _split_command(command: str) -> list[str]:
@@ -234,10 +271,12 @@ class OpsEngine:
     # ------------------------------------------------------------------
 
     async def process_task(self, task_id: str) -> None:
-        task = self.store.get_task(task_id)
+        task = await self._db(self.store.get_task, task_id)
         if task.status != TaskStatus.QUEUED:
             return
-        self.store.update_task(task_id, TaskStatus.RUNNING, phase=MapePhase.MONITOR)
+        await self._db(
+            self.store.update_task, task_id, TaskStatus.RUNNING, phase=MapePhase.MONITOR
+        )
         try:
             if task.kind == TaskKind.ANALYZE:
                 await self._run_analysis_graph(task_id)
@@ -250,10 +289,15 @@ class OpsEngine:
             else:
                 raise ValueError(f"unsupported task kind: {task.kind.value}")
         except Exception as exc:
-            current = self.store.get_task(task_id)
+            current = await self._db(self.store.get_task, task_id)
             if current.status not in TERMINAL_TASK_STATUSES:
-                self.store.update_task(
-                    task_id, TaskStatus.FAILED, error=str(exc), phase=MapePhase.KNOWLEDGE, force=True
+                await self._db(
+                    self.store.update_task,
+                    task_id,
+                    TaskStatus.FAILED,
+                    error=str(exc),
+                    phase=MapePhase.KNOWLEDGE,
+                    force=True,
                 )
 
     async def _run_analysis_graph(self, task_id: str) -> None:
@@ -268,15 +312,17 @@ class OpsEngine:
 
     async def _verify_task(self, task_id: str) -> None:
         """Run a verification command and analyze its output."""
-        self._mark_phase(task_id, MapePhase.MONITOR, "capturing verification input")
+        await self._db(self._mark_phase, task_id, MapePhase.MONITOR, "capturing verification input")
         request, _env = await self._monitor(task_id)
-        run = self.store.get_task(task_id).input.get("run")
+        task = await self._db(self.store.get_task, task_id)
+        run = task.input.get("run")
         if not run:
             raise ValueError("VERIFY task is missing run payload")
 
-        self._mark_phase(task_id, MapePhase.EXECUTE, "running verification command")
+        await self._db(self._mark_phase, task_id, MapePhase.EXECUTE, "running verification command")
         result = await self._run_command(run["command"], run.get("cwd"), run.get("timeout", 120))
-        obs = self.store.add_observation(
+        obs = await self._db(
+            self.store.add_observation,
             task_id,
             "command_result",
             "verify",
@@ -285,9 +331,10 @@ class OpsEngine:
             result,
         )
 
-        self._mark_phase(task_id, MapePhase.OBSERVE, "analyzing verification output")
+        await self._db(self._mark_phase, task_id, MapePhase.OBSERVE, "analyzing verification output")
         for match in classify_error(result["stdout"] + "\n" + result["stderr"], result["returncode"])["findings"]:
-            self.store.add_finding(
+            await self._db(
+                self.store.add_finding,
                 task_id,
                 match["code"],
                 Severity(match["severity"]),
@@ -306,10 +353,12 @@ class OpsEngine:
         )
 
     async def _probe_task(self, task_id: str) -> None:
-        self._mark_phase(task_id, MapePhase.MONITOR, "capturing environment snapshot")
-        request = AnalysisRequest.model_validate(self.store.get_task(task_id).input)
+        await self._db(self._mark_phase, task_id, MapePhase.MONITOR, "capturing environment snapshot")
+        task = await self._db(self.store.get_task, task_id)
+        request = AnalysisRequest.model_validate(task.input)
         env = self.probe.snapshot(cwd=request.cwd, language=request.language)
-        self.store.add_observation(
+        await self._db(
+            self.store.add_observation,
             task_id,
             "env_snapshot",
             "EnvProbe",
@@ -317,32 +366,37 @@ class OpsEngine:
             "Collected a safe view of the local execution environment.",
             env.model_dump(mode="json"),
         )
-        self.store.update_task(
+        report = await self._db(self._build_report, task_id, "Environment snapshot completed.")
+        await self._db(
+            self.store.update_task,
             task_id,
             TaskStatus.SUCCEEDED,
             phase=MapePhase.KNOWLEDGE,
-            report=self._build_report(task_id, "Environment snapshot completed."),
+            report=report,
         )
 
     async def _knowledge_task(self, task_id: str) -> None:
-        self._mark_phase(task_id, MapePhase.KNOWLEDGE, "recording explicit knowledge")
-        task = self.store.get_task(task_id)
+        await self._db(self._mark_phase, task_id, MapePhase.KNOWLEDGE, "recording explicit knowledge")
+        task = await self._db(self.store.get_task, task_id)
         entry = task.input.get("knowledge", {})
-        self.store.add_knowledge(
+        await self._db(
+            self.store.add_knowledge,
             task_id,
             entry.get("kind", "note"),
             entry.get("title", "Untitled"),
             entry.get("content", {}),
         )
-        self.store.update_task(
+        report = await self._db(self._build_report, task_id, "Knowledge entry recorded.")
+        await self._db(
+            self.store.update_task,
             task_id,
             TaskStatus.SUCCEEDED,
             phase=MapePhase.KNOWLEDGE,
-            report=self._build_report(task_id, "Knowledge entry recorded."),
+            report=report,
         )
 
     async def _monitor(self, task_id: str) -> tuple[AnalysisRequest, EnvSnapshot]:
-        task = self.store.get_task(task_id)
+        task = await self._db(self.store.get_task, task_id)
         request_data = dict(task.input)
         request_data.pop("run", None)
         request = AnalysisRequest.model_validate(request_data)
@@ -355,7 +409,8 @@ class OpsEngine:
             request.exit_code = result["returncode"]
 
         env = self.probe.snapshot(cwd=request.cwd, language=request.language)
-        self.store.add_observation(
+        await self._db(
+            self.store.add_observation,
             task_id,
             "analysis_input",
             request.source,
@@ -377,11 +432,16 @@ class OpsEngine:
         llm_attribution: LLMAttribution | None = None,
         retrieved_knowledge_ids: list[str] | None = None,
     ) -> None:
-        self._mark_phase(task_id, MapePhase.KNOWLEDGE, "recording analysis outcome")
-        findings = self.store.list_findings(task_id)
+        await self._db(self._mark_phase, task_id, MapePhase.KNOWLEDGE, "recording analysis outcome")
+        findings = await self._db(self.store.list_findings, task_id)
         if summary is None:
-            summary = f"Analysis found {len(findings)} likely issue(s)." if findings else "Analysis completed with no actionable findings."
-        self.store.add_knowledge(
+            summary = (
+                f"Analysis found {len(findings)} likely issue(s)."
+                if findings
+                else "Analysis completed with no actionable findings."
+            )
+        await self._db(
+            self.store.add_knowledge,
             task_id,
             "analysis_summary",
             summary,
@@ -393,22 +453,25 @@ class OpsEngine:
                 "retrieved_knowledge_ids": retrieved_knowledge_ids or [],
             },
         )
-        self.store.update_task(
+        report = await self._db(
+            self._build_report,
+            task_id,
+            summary,
+            llm_attribution=llm_attribution,
+            retrieved_knowledge_ids=retrieved_knowledge_ids,
+        )
+        await self._db(
+            self.store.update_task,
             task_id,
             TaskStatus.SUCCEEDED,
             phase=MapePhase.KNOWLEDGE,
-            report=self._build_report(
-                task_id, summary, llm_attribution=llm_attribution, retrieved_knowledge_ids=retrieved_knowledge_ids
-            ),
+            report=report,
         )
 
     async def _run_command(
         self, command: list[str] | str, cwd: str | None = None, timeout: int = 120
     ) -> dict[str, Any]:
-        if isinstance(command, str):
-            args = self._split_command(command)
-        else:
-            args = list(command)
+        args = self._split_command(command) if isinstance(command, str) else list(command)
         if not args:
             raise ValueError("command is empty")
         resolved_cwd = cwd if cwd and Path(cwd).exists() else None
@@ -481,15 +544,28 @@ class OpsEngine:
 
     async def _reconcile_task(self, task_id: str) -> None:
         """Resume execution after a daemon restart."""
-        task = self.store.get_task(task_id)
+        task = await self._db(self.store.get_task, task_id)
         if task.status == TaskStatus.RECONCILING and task.phase == MapePhase.EXECUTE:
+            actions = await self._db(self.store.list_actions, task_id)
             pending_action = next(
-                (action for action in self.store.list_actions(task_id) if action.status == ActionStatus.APPROVED),
+                (action for action in actions if action.status == ActionStatus.APPROVED),
                 None,
             )
             if pending_action:
                 self._spawn(self._run_execution_graph(task_id, pending_action.id))
             else:
-                self.store.update_task(task_id, TaskStatus.FAILED, error="no approved action to reconcile", force=True)
+                await self._db(
+                    self.store.update_task,
+                    task_id,
+                    TaskStatus.FAILED,
+                    error="no approved action to reconcile",
+                    force=True,
+                )
         else:
-            self.store.update_task(task_id, TaskStatus.FAILED, error="unrecoverable state after restart", force=True)
+            await self._db(
+                self.store.update_task,
+                task_id,
+                TaskStatus.FAILED,
+                error="unrecoverable state after restart",
+                force=True,
+            )

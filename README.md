@@ -32,8 +32,8 @@ capture ──▶ classify ──▶ attribute ──▶ plan ──▶ approve 
 ### Install
 
 ```bash
-git clone https://github.com/user/termops.git
-cd termops
+git clone https://github.com/hxd71/Termops.git
+cd Termops
 python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
@@ -122,7 +122,7 @@ export TERMOPS_LLM_ENABLED=true
 | `ollama` | — | `qwen2.5:7b` | `http://localhost:11434/v1` |
 | `openai_compatible` | `LLM_API_KEY` | (user-defined) | `http://localhost:8080/v1` |
 
-Keys live only in the local config file or the environment: never in logs, never in the database, never in API responses.
+Keys live in plaintext in the local config file (auto-`chmod 0600`) or in the `TERMOPS_LLM_API_KEY` environment variable — pick one: never in logs, never in the database, never in API responses.
 
 ---
 
@@ -206,7 +206,7 @@ Restart your terminal or source your profile to activate.
 - Approval gating: actions execute only after `approve`; they expire in 15 minutes and carry SHA-256 digests against replay and tampering.
 - The action engine exposes no arbitrary shell, file read, or network capability.
 - The Web UI binds to `127.0.0.1` only, with HttpOnly + SameSite=Strict cookies.
-- Secrets are never logged, stored in the database, or returned by the API.
+- Secrets live in the local config file (`0600` permissions) or the environment, never in logs, the database, or API responses.
 
 ## CLI cheat sheet
 

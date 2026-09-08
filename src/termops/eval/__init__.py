@@ -31,7 +31,7 @@ Architecture:
 """
 
 from .benchmark import EvalEngine, EvalResult, EvalSample, EvalSummary
-from .dataset import load_dataset, load_dataset_from_jsonl, list_datasets
+from .dataset import list_datasets, load_dataset, load_dataset_from_jsonl
 
 __all__ = [
     "EvalEngine",

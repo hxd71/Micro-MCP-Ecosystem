@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hmac
 from typing import Any
 
@@ -69,7 +70,7 @@ def create_app(settings: Settings, engine: OpsEngine) -> FastAPI:
 
     @app.get("/healthz")
     async def healthz() -> dict[str, Any]:
-        caps = engine.capabilities()
+        caps = await asyncio.to_thread(engine.capabilities)
         return {
             "ok": True,
             "profile": settings.profile,
@@ -85,11 +86,12 @@ def create_app(settings: Settings, engine: OpsEngine) -> FastAPI:
 
     @app.get("/v1/capabilities", dependencies=[Depends(require_operator_token)])
     async def capabilities() -> dict[str, Any]:
-        return engine.capabilities()
+        return await asyncio.to_thread(engine.capabilities)
 
     @app.post("/v1/tasks/analyze", dependencies=[Depends(require_operator_token)], status_code=202)
     async def analyze(request: AnalyzeRequest) -> dict[str, Any]:
-        return engine.submit_analysis(
+        task = await asyncio.to_thread(
+            engine.submit_analysis,
             request.text,
             source=request.source,
             language=request.language,
@@ -98,24 +100,29 @@ def create_app(settings: Settings, engine: OpsEngine) -> FastAPI:
             exit_code=request.exit_code,
             files=request.files,
             history_task_ids=request.history_task_ids,
-        ).model_dump(mode="json")
+        )
+        return task.model_dump(mode="json")
 
     @app.post("/v1/tasks/run", dependencies=[Depends(require_operator_token)], status_code=202)
     async def run_command(request: RunRequest) -> dict[str, Any]:
-        return engine.submit_run(
+        task = await asyncio.to_thread(
+            engine.submit_run,
             request.command,
             cwd=request.cwd,
             language=request.language,
             timeout=request.timeout,
-        ).model_dump(mode="json")
+        )
+        return task.model_dump(mode="json")
 
     @app.post("/v1/tasks/probe", dependencies=[Depends(require_operator_token)], status_code=202)
     async def probe(request: AnalyzeRequest) -> dict[str, Any]:
-        return engine.submit_probe(cwd=request.cwd, language=request.language).model_dump(mode="json")
+        task = await asyncio.to_thread(engine.submit_probe, cwd=request.cwd, language=request.language)
+        return task.model_dump(mode="json")
 
     @app.post("/v1/knowledge", dependencies=[Depends(require_operator_token)], status_code=202)
     async def record_knowledge(request: KnowledgeRecordRequest) -> dict[str, Any]:
-        task = engine.store.create_task(
+        task = await asyncio.to_thread(
+            engine.store.create_task,
             TaskKind.KNOWLEDGE_RECORD,
             TargetRef(kind="workspace", name="knowledge"),
             {"knowledge": request.model_dump()},
@@ -124,45 +131,49 @@ def create_app(settings: Settings, engine: OpsEngine) -> FastAPI:
 
     @app.get("/v1/tasks", dependencies=[Depends(require_operator_token)])
     async def list_tasks(limit: int = 100) -> list[dict[str, Any]]:
-        return [item.model_dump(mode="json") for item in engine.store.list_tasks(min(max(limit, 1), 500))]
+        tasks = await asyncio.to_thread(engine.store.list_tasks, min(max(limit, 1), 500))
+        return [item.model_dump(mode="json") for item in tasks]
 
     @app.get("/v1/tasks/{task_id}", dependencies=[Depends(require_operator_token)])
     async def task_detail(task_id: str) -> dict[str, Any]:
-        return engine.task_detail(task_id)
+        return await asyncio.to_thread(engine.task_detail, task_id)
 
     @app.get("/v1/tasks/{task_id}/events", dependencies=[Depends(require_operator_token)])
     async def task_events(task_id: str, after: int = 0) -> list[dict[str, Any]]:
-        engine.store.get_task(task_id)
-        return engine.store.list_events(task_id, after_seq=max(after, 0))
+        await asyncio.to_thread(engine.store.get_task, task_id)
+        return await asyncio.to_thread(engine.store.list_events, task_id, after_seq=max(after, 0))
 
     @app.get("/v1/tasks/{task_id}/knowledge", dependencies=[Depends(require_operator_token)])
     async def task_knowledge(task_id: str) -> list[dict[str, Any]]:
-        engine.store.get_task(task_id)
-        return engine.store.list_knowledge(task_id)
+        await asyncio.to_thread(engine.store.get_task, task_id)
+        return await asyncio.to_thread(engine.store.list_knowledge, task_id)
 
     @app.post("/v1/tasks/{task_id}/cancel", dependencies=[Depends(require_operator_token)])
     async def cancel_task(task_id: str) -> dict[str, Any]:
-        return engine.cancel_task(task_id).model_dump(mode="json")
+        task = await asyncio.to_thread(engine.cancel_task, task_id)
+        return task.model_dump(mode="json")
 
     @app.get("/v1/actions/{action_id}", dependencies=[Depends(require_operator_token)])
     async def get_action(action_id: str) -> dict[str, Any]:
-        return engine.store.get_action(action_id).model_dump(mode="json")
+        action = await asyncio.to_thread(engine.store.get_action, action_id)
+        return action.model_dump(mode="json")
 
     @app.post("/v1/actions/{action_id}/decision", dependencies=[Depends(require_operator_token)])
     async def decide_action(action_id: str, decision: ApprovalDecision) -> dict[str, Any]:
-        return engine.decide_action(action_id, decision).model_dump(mode="json")
+        action = await asyncio.to_thread(engine.decide_action, action_id, decision)
+        return action.model_dump(mode="json")
 
     @app.get("/v1/events", dependencies=[Depends(require_operator_token)])
     async def audit_events(limit: int = 200) -> list[dict[str, Any]]:
-        return engine.store.list_events(limit=min(max(limit, 1), 500))
+        return await asyncio.to_thread(engine.store.list_events, limit=min(max(limit, 1), 500))
 
     @app.get("/v1/knowledge", dependencies=[Depends(require_operator_token)])
     async def knowledge(limit: int = 200) -> list[dict[str, Any]]:
-        return engine.store.list_knowledge(limit=min(max(limit, 1), 500))
+        return await asyncio.to_thread(engine.store.list_knowledge, limit=min(max(limit, 1), 500))
 
     @app.post("/v1/knowledge/search", dependencies=[Depends(require_operator_token)])
     async def search_knowledge(request: KnowledgeSearchRequest) -> dict[str, Any]:
-        results = engine.store.search_knowledge(request.query, limit=request.limit)
+        results = await asyncio.to_thread(engine.store.search_knowledge, request.query, request.limit)
         return {
             "query": request.query,
             "count": len(results),
@@ -172,14 +183,14 @@ def create_app(settings: Settings, engine: OpsEngine) -> FastAPI:
 
     @app.get("/v1/knowledge/stats", dependencies=[Depends(require_operator_token)])
     async def knowledge_stats() -> dict[str, Any]:
-        return engine.store.knowledge_stats()
+        return await asyncio.to_thread(engine.store.knowledge_stats)
 
     @app.post("/v1/web/login-code", dependencies=[Depends(require_operator_token)])
     async def create_login_code() -> dict[str, Any]:
         from .security import new_token
 
         code = new_token()
-        engine.store.create_login_code(code)
+        await asyncio.to_thread(engine.store.create_login_code, code)
         return {"url": f"http://{settings.web_host}:{settings.web_port}/login?code={code}", "expires_in": 120}
 
     app.include_router(build_web_router(settings, engine))
