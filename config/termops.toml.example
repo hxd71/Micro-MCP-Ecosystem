@@ -1,0 +1,36 @@
+# Termops example configuration.
+#
+# Copy this file to ~/.termops/config/config.toml and edit as needed.
+# Run `termops config show` to print the resolved path and values.
+# Most values can also be set via TERMOPS_* / ERRA_* environment variables.
+
+[server]
+web_host = "127.0.0.1"        # loopback only; the Web UI rejects non-loopback binds
+web_port = 8923
+state_dir = "~/.termops"      # database, backups, and secrets live here
+run_dir = "~/.termops/run"    # Unix socket and pid files
+
+[operator]
+name = "local-operator"
+
+[policy]
+approval_ttl_seconds = 900    # how long a pending approval stays valid
+# env_allowlist = ["PATH", "HOME", "USER", "SHELL"]  # env vars captured with tasks
+
+[llm]
+provider = "ollama"           # openai | anthropic | ollama | openai_compatible
+enabled = false               # set true to enable LLM attribution
+api_key = ""                  # only needed for openai / anthropic / compatible
+base_url = "http://localhost:11434/v1"  # omit to fall back to the provider default
+model = "qwen2.5:7b"
+timeout = 60.0
+temperature = 0.2
+max_tokens = 4096
+
+[hook]
+enabled = false               # auto-capture failing terminal commands
+shell = "auto"                # auto | powershell | bash | zsh
+capture_stdout = true
+capture_stderr = true
+max_output = 8000
+min_exit_code = 1             # only capture commands exiting with code >= this

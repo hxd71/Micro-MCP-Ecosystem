@@ -25,14 +25,14 @@
 
 - [README.md](README.md) - 重新定义项目定位、CLI 用法、示例输入和能力边界。
 - [pyproject.toml](pyproject.toml) - 更新项目描述、脚本入口、包名叙事与依赖边界。
-- [src/aiops_agent/cli.py](src/aiops_agent/cli.py) - 重做 CLI 命令树，增加通用分析与安全执行入口。
-- [src/aiops_agent/engine.py](src/aiops_agent/engine.py) - 抽象任务分发、MAPE-K 流转和审批闭环。
-- [src/aiops_agent/diagnostics.py](src/aiops_agent/diagnostics.py) - 替换领域特化规则为通用报错分类与证据提取。
-- [src/aiops_agent/models.py](src/aiops_agent/models.py) - 重定义任务类型、输入模型、分析结果和工具调用提案。
-- [src/aiops_agent/api.py](src/aiops_agent/api.py) - 收敛 HTTP 接口，改成通用分析 API。
-- [src/aiops_agent/web.py](src/aiops_agent/web.py) - 把 UI 改成通用错误看板、建议详情和审批视图。
-- [src/aiops_agent/config.py](src/aiops_agent/config.py) - 处理默认目录、环境变量和命名从 AIOps 到通用 agent 的迁移。
-- [src/aiops_agent/store.py](src/aiops_agent/store.py) - 承接任务、事件、知识沉淀和审计链。
+- [src/termops/cli.py](src/termops/cli.py) - 重做 CLI 命令树，增加通用分析与安全执行入口。
+- [src/termops/engine.py](src/termops/engine.py) - 抽象任务分发、MAPE-K 流转和审批闭环。
+- [src/termops/diagnostics.py](src/termops/diagnostics.py) - 替换领域特化规则为通用报错分类与证据提取。
+- [src/termops/models.py](src/termops/models.py) - 重定义任务类型、输入模型、分析结果和工具调用提案。
+- [src/termops/api.py](src/termops/api.py) - 收敛 HTTP 接口，改成通用分析 API。
+- [src/termops/web.py](src/termops/web.py) - 把 UI 改成通用错误看板、建议详情和审批视图。
+- [src/termops/config.py](src/termops/config.py) - 处理默认目录、环境变量和命名从 AIOps 到通用 agent 的迁移。
+- [src/termops/store.py](src/termops/store.py) - 承接任务、事件、知识沉淀和审计链。
 - [tests/test_api_web.py](tests/test_api_web.py) - 需要改成验证通用分析 API / Web 逻辑。
 - [tests/test_contracts.py](tests/test_contracts.py) - 需要改成验证通用任务与 schema 契约。
 - [tests/test_engine.py](tests/test_engine.py) - 重点覆盖新分析引擎的分类、证据、审批和任务流。
